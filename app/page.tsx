@@ -15,9 +15,9 @@ const events=[["18","SEP","Kajian Ba'da Magrib","Ustaz Ahmad Fauzan · Aula utam
 
 export default function Page(){
  const [view,setView]=useState<View>("beranda"),[open,setOpen]=useState(false),[donate,setDonate]=useState(false),[amount,setAmount]=useState(100000),[done,setDone]=useState(false),[role,setRole]=useState("Pengurus"),[records,setRecords]=useState<DataRecord[]>([]),[form,setForm]=useState<Kind|null>(null);
- useEffect(()=>{fetch("/api/records").then(r=>r.json()).then(d=>setRecords(d.records??[])).catch(()=>{})},[]);
- async function save(data:Omit<DataRecord,"id">){const r=await fetch("/api/records",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(data)});const d=await r.json();if(!r.ok)throw new Error(d.error);setRecords(x=>[d.record,...x]);setForm(null)}
- async function remove(id:number){if(!confirm("Hapus data ini?"))return;await fetch("/api/records?id="+id,{method:"DELETE"});setRecords(x=>x.filter(r=>r.id!==id))}
+ useEffect(()=>{try{setRecords(JSON.parse(localStorage.getItem("baitul-fadli-records")||"[]"))}catch{setRecords([])}},[]);
+ async function save(data:Omit<DataRecord,"id">){const record={...data,id:Date.now()};setRecords(x=>{const next=[record,...x];localStorage.setItem("baitul-fadli-records",JSON.stringify(next));return next});setForm(null)}
+ async function remove(id:number){if(!confirm("Hapus data ini?"))return;setRecords(x=>{const next=x.filter(r=>r.id!==id);localStorage.setItem("baitul-fadli-records",JSON.stringify(next));return next})}
  const title=nav.find(n=>n[0]===view)?.[1];
  return <div className="shell">
   <aside className={"sidebar "+(open?"open":"")}><button className="close" onClick={()=>setOpen(false)}><X/></button>
