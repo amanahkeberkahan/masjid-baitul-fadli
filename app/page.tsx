@@ -1,21 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import {
   addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query,
-  serverTimestamp, type DocumentData, type QueryDocumentSnapshot, type Unsubscribe,
+  serverTimestamp, writeBatch, type DocumentData, type QueryDocumentSnapshot, type Unsubscribe,
 } from "firebase/firestore";
 import {
   ArrowDownLeft, ArrowUpRight, CalendarDays, CheckCircle2, ChevronRight,
-  HeartHandshake, Home, Landmark, LogIn, LogOut, Menu, Plus, Settings,
+  HeartHandshake, Home, Landmark, LogOut, Plus, Settings,
   ShieldCheck, Trash2, Users, Wallet, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { auth, db } from "@/lib/firebase";
+import historicalTransactions from "@/data/finance-history.json";
 
 type View = "beranda" | "keuangan" | "program" | "kegiatan" | "jamaah" | "pengaturan";
 type Kind = "transaction" | "program" | "event" | "member";
@@ -54,7 +55,6 @@ function mapRecord(kind: Kind, item: QueryDocumentSnapshot<DocumentData>): DataR
 
 export default function Page() {
   const [view, setView] = useState<View>("beranda");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [records, setRecords] = useState<DataRecord[]>([]);
   const [form, setForm] = useState<Kind | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -63,6 +63,7 @@ export default function Page() {
   const [admin, setAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [error, setError] = useState("");
+  const lastLogoTap = useRef(0);
 
   useEffect(() => onAuthStateChanged(auth, async (currentUser) => {
     setUser(currentUser);
@@ -126,21 +127,30 @@ export default function Page() {
     await deleteDoc(doc(db, paths[record.kind], record.id));
   }
 
+  function handleLogoTap() {
+    if (admin || !authReady) return;
+    const now = Date.now();
+    if (now - lastLogoTap.current < 500) {
+      setLoginOpen(true);
+      lastLogoTap.current = 0;
+    } else {
+      lastLogoTap.current = now;
+    }
+  }
+
   const nav = admin ? [...publicNav, ...privateNav] : publicNav;
   const title = view === "pengaturan" ? "Pengaturan" : nav.find(([id]) => id === view)?.[1] ?? "Beranda";
   return <div className="shell">
-    <aside className={"sidebar " + (menuOpen ? "open" : "")}>
-      <button className="close" onClick={() => setMenuOpen(false)} aria-label="Tutup menu"><X /></button>
-      <div className="brand"><Image src="/logo-baitul-fadli.webp" alt="Masjid Baitul Fadli" width={500} height={500} priority /></div>
+    <aside className="sidebar">
+      <button className="brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-white.png" alt="Masjid Baitul Fadli" width={1536} height={1024} priority /></button>
       <p className="caption">MENU UTAMA</p>
-      <nav>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon />{label}</button>)}</nav>
-      <div className="sidebar-foot"><button className={view === "pengaturan" ? "active" : ""} onClick={() => { if (admin) setView("pengaturan"); else setLoginOpen(true); setMenuOpen(false); }}><Settings />Pengaturan</button><section><ShieldCheck /><strong>{admin ? "Mode pengurus aktif" : "Data masjid aman"}</strong><small>{admin ? "Anda dapat mengelola data masjid." : "Data pribadi hanya dapat dibuka pengurus."}</small></section></div>
+      <nav>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon />{label}</button>)}</nav>
+      <div className="sidebar-foot">{admin && <button className={view === "pengaturan" ? "active" : ""} onClick={() => setView("pengaturan")}><Settings />Pengaturan</button>}<section><ShieldCheck /><strong>{admin ? "Mode pengurus aktif" : "Data masjid aman"}</strong><small>{admin ? "Anda dapat mengelola data masjid." : "Informasi publik dapat dibuka tanpa akun."}</small></section></div>
     </aside>
-    {menuOpen && <button className="overlay" onClick={() => setMenuOpen(false)} aria-label="Tutup menu" />}
     <main>
       <header>
-        <div className="heading"><button className="hamb" onClick={() => setMenuOpen(true)} aria-label="Buka menu"><Menu /></button><div><small>Terhubung ke Firebase</small><h1>{title}</h1></div></div>
-        <div className="tools">{admin ? <><Button variant="outline" onClick={logout}><LogOut />Keluar</Button><span className="avatar">{user?.email?.slice(0, 2).toUpperCase() ?? "PG"}</span></> : <Button variant="outline" disabled={!authReady} onClick={() => setLoginOpen(true)}><LogIn />Masuk Pengurus</Button>}</div>
+        <div className="heading"><button className="mobile-brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-white.png" alt="Masjid Baitul Fadli" width={1536} height={1024} priority /></button><div><small>Masjid Baitul Fadli</small><h1>{title}</h1></div></div>
+        <div className="tools">{admin && <><Button className="account-button" variant="outline" onClick={() => setView("pengaturan")}><Settings /><span>Akun</span></Button><span className="avatar">{user?.email?.slice(0, 2).toUpperCase() ?? "PG"}</span></>}</div>
       </header>
       <div className="page">
         {error && <p className="data-alert">{error}</p>}
@@ -153,6 +163,7 @@ export default function Page() {
           : <Dashboard records={records} admin={admin} go={setView} donate={() => setDonateOpen(true)} />}
       </div>
     </main>
+    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Donasi" : label.replace("Data ", "")}</span></button>)}</nav>
     {form && <EntryForm kind={form} close={() => setForm(null)} save={save} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
     {donateOpen && <DonationModal close={() => setDonateOpen(false)} />}
@@ -190,11 +201,39 @@ function Dashboard({ records, admin, go, donate }: { records: DataRecord[]; admi
 }
 
 function SettingsPage({ user, logout }: { user: User; logout: () => Promise<void> }) {
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState("");
+
+  async function importFinanceHistory() {
+    if (!confirm("Impor 779 transaksi sampai 11 September 2026? Data lama dengan ID yang sama akan diperbarui, bukan digandakan.")) return;
+    setImporting(true); setImportResult("");
+    try {
+      for (let start = 0; start < historicalTransactions.length; start += 400) {
+        const batch = writeBatch(db);
+        historicalTransactions.slice(start, start + 400).forEach((item) => {
+          batch.set(doc(db, "transactions", item.id), {
+            title: item.title, date: item.date, amount: item.amount, type: item.type,
+            category: item.category, details: item.details, target: 0, phone: "", address: "",
+            createdAt: new Date(`${item.date}T00:00:00`), createdBy: user.uid,
+            source: "Google Sheet MBF", sourceSheet: item.sourceSheet, importVersion: "2026-09-11",
+          }, { merge: true });
+        });
+        await batch.commit();
+      }
+      setImportResult("Berhasil: 779 transaksi terhubung. Saldo per 11 September 2026 adalah Rp1.230.000.");
+    } catch {
+      setImportResult("Impor belum berhasil. Pastikan akun masih aktif dan Rules Firestore mengizinkan pengurus menulis transaksi.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return <div className="stack">
     <Intro eyebrow="PENGATURAN AKUN" title="Pengaturan Pengurus" description="Informasi akun dan koneksi penyimpanan aplikasi Masjid Baitul Fadli." />
     <div className="settings-grid">
       <section className="setting-card"><span><ShieldCheck /></span><div><small>AKUN AKTIF</small><h3>{user.email}</h3><p>Akun ini terdaftar sebagai pengurus aktif dan dapat mengelola data masjid.</p></div></section>
       <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Firebase Firestore</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>
+      <section className="setting-card wide finance-import"><span><Wallet /></span><div><small>RIWAYAT KEUANGAN</small><h3>Data sampai 11 September 2026</h3><p>Impor 779 transaksi dari laporan lama. Proses ini aman dijalankan ulang karena menggunakan ID tetap sehingga tidak menggandakan data.</p>{importResult && <p className="import-result">{importResult}</p>}</div><Button className="primary" disabled={importing} onClick={importFinanceHistory}>{importing ? "Mengimpor..." : "Impor ke Firestore"}</Button></section>
       <section className="setting-card wide"><span><Landmark /></span><div><small>IDENTITAS APLIKASI</small><h3>Masjid Baitul Fadli</h3><p>Logo resmi dan nama masjid telah diterapkan pada tampilan aplikasi.</p></div><Button variant="outline" onClick={logout}><LogOut />Keluar dari akun</Button></section>
     </div>
   </div>;
