@@ -1,63 +1,265 @@
 "use client";
-import {useEffect,useState} from "react";
-import {ArrowDownLeft,ArrowUpRight,Bell,CalendarDays,CheckCircle2,ChevronRight,Download,HeartHandshake,Home,Landmark,Menu,MoreHorizontal,Plus,ReceiptText,Search,Settings,ShieldCheck,Trash2,Users,Wallet,X} from "lucide-react";
-import {Button} from "@/components/ui/button";
-import {Progress} from "@/components/ui/progress";
 
-type View="beranda"|"keuangan"|"program"|"kegiatan"|"jamaah";
-type Kind="transaction"|"program"|"event"|"member";
-type DataRecord={id:number;kind:Kind;title:string;date:string;amount:number;type:string;category:string;details:string;target:number;phone:string;address:string};
-const money=(n:number)=>new Intl.NumberFormat("id-ID",{style:"currency",currency:"IDR",maximumFractionDigits:0}).format(n);
-const nav=[["beranda","Beranda",Home],["keuangan","Keuangan",Wallet],["program","Program Donasi",HeartHandshake],["kegiatan","Kegiatan",CalendarDays],["jamaah","Data Jamaah",Users]] as const;
-const trx=[["Infak Jumat","13 Sep 2026",4750000,true],["Pembayaran listrik","12 Sep 2026",1285000,false],["Donasi renovasi","11 Sep 2026",2500000,true],["Konsumsi kajian","10 Sep 2026",875000,false]] as const;
-const programs=[{name:"Renovasi Tempat Wudu",raised:38750000,target:60000000,donors:86,color:"emerald",icon:Landmark},{name:"Santunan Yatim",raised:14200000,target:20000000,donors:47,color:"amber",icon:Users},{name:"Operasional Masjid",raised:8450000,target:15000000,donors:31,color:"blue",icon:ReceiptText}];
-const events=[["18","SEP","Kajian Ba'da Magrib","Ustaz Ahmad Fauzan · Aula utama","Kajian"],["20","SEP","Jumat Berkah","Pukul 10.00 · Dapur masjid","Sosial"],["22","SEP","TPQ Anak","Pukul 15.30 · Ruang TPQ","Pendidikan"]] as const;
+import { useEffect, useState } from "react";
+import type { User } from "firebase/auth";
+import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import {
+  addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query,
+  serverTimestamp, type DocumentData, type QueryDocumentSnapshot, type Unsubscribe,
+} from "firebase/firestore";
+import {
+  ArrowDownLeft, ArrowUpRight, CalendarDays, CheckCircle2, ChevronRight,
+  HeartHandshake, Home, Landmark, LogIn, LogOut, Menu, Plus, Settings,
+  ShieldCheck, Trash2, Users, Wallet, X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { auth, db } from "@/lib/firebase";
 
-export default function Page(){
- const [view,setView]=useState<View>("beranda"),[open,setOpen]=useState(false),[donate,setDonate]=useState(false),[amount,setAmount]=useState(100000),[done,setDone]=useState(false),[role,setRole]=useState("Pengurus"),[records,setRecords]=useState<DataRecord[]>([]),[form,setForm]=useState<Kind|null>(null);
- useEffect(()=>{try{setRecords(JSON.parse(localStorage.getItem("baitul-fadli-records")||"[]"))}catch{setRecords([])}},[]);
- async function save(data:Omit<DataRecord,"id">){const record={...data,id:Date.now()};setRecords(x=>{const next=[record,...x];localStorage.setItem("baitul-fadli-records",JSON.stringify(next));return next});setForm(null)}
- async function remove(id:number){if(!confirm("Hapus data ini?"))return;setRecords(x=>{const next=x.filter(r=>r.id!==id);localStorage.setItem("baitul-fadli-records",JSON.stringify(next));return next})}
- const title=nav.find(n=>n[0]===view)?.[1];
- return <div className="shell">
-  <aside className={"sidebar "+(open?"open":"")}><button className="close" onClick={()=>setOpen(false)}><X/></button>
-   <div className="brand"><span><Landmark/></span><div><strong>Masjid Baitul Fadi</strong><small>Pusat Layanan Jamaah</small></div></div>
-   <p className="caption">MENU UTAMA</p><nav>{nav.map(([id,label,Icon])=><button key={id} className={view===id?"active":""} onClick={()=>{setView(id);setOpen(false)}}><Icon/>{label}{id==="program"&&<b>3</b>}</button>)}</nav>
-   <div className="sidebar-foot"><button><Settings/>Pengaturan</button><section><ShieldCheck/><strong>Data masjid aman</strong><small>Ringkasan hanya dapat diubah oleh pengurus.</small></section></div>
-  </aside>{open&&<button className="overlay" onClick={()=>setOpen(false)}/>}
-  <main><header><div className="heading"><button className="hamb" onClick={()=>setOpen(true)}><Menu/></button><div><small>14 September 2026</small><h1>{title}</h1></div></div><div className="tools"><label><Search/><input placeholder="Cari data..."/></label><button className="bell"><Bell/><i/></button><select value={role} onChange={e=>setRole(e.target.value)}><option>Pengurus</option><option>Jamaah</option><option>Donatur</option></select><span className="avatar">CB</span></div></header>
-   <div className="page">{view==="beranda"?<Dashboard go={setView} donate={()=>setDonate(true)}/>:view==="keuangan"?<Finance records={records} add={()=>setForm("transaction")} remove={remove}/>:view==="program"?<Programs records={records} add={()=>setForm("program")} donate={()=>setDonate(true)} remove={remove}/>:view==="kegiatan"?<Events records={records} add={()=>setForm("event")} remove={remove}/>:<Members records={records} add={()=>setForm("member")} remove={remove}/>}</div>
-  </main>
-  {form&&<EntryForm kind={form} close={()=>setForm(null)} save={save}/>}
-  {donate&&<div className="modal-wrap"><button className="backdrop" onClick={()=>{setDonate(false);setDone(false)}}/><section className="modal"><button className="modal-x" onClick={()=>setDonate(false)}><X/></button>{done?<div className="success"><span><CheckCircle2/></span><h2>Jazakumullahu khairan</h2><p>Niat donasi Anda sudah dicatat. Silakan lanjutkan transfer ke rekening masjid.</p><div>BSI · 7123 4567 890<strong>{money(amount)}</strong></div><Button onClick={()=>setDonate(false)}>Selesai</Button></div>:<><p className="eyebrow">DONASI MASJID</p><h2>Mulai kebaikan hari ini</h2><p>Pilih nominal donasi. Petunjuk transfer tampil setelah Anda melanjutkan.</p><div className="amounts">{[50000,100000,250000,500000].map(n=><button className={amount===n?"chosen":""} onClick={()=>setAmount(n)} key={n}>{money(n)}</button>)}</div><label className="field">Nominal lainnya<div>Rp<input type="number" value={amount} onChange={e=>setAmount(Number(e.target.value))}/></div></label><label className="field">Pilih program<select><option>Renovasi Tempat Wudu</option><option>Santunan Yatim</option><option>Operasional Masjid</option></select></label><Button className="primary" onClick={()=>setDone(true)}>Lanjutkan Donasi <ChevronRight/></Button></>}</section></div>}
- </div>
+type View = "beranda" | "keuangan" | "program" | "kegiatan" | "jamaah";
+type Kind = "transaction" | "program" | "event" | "member";
+type DataRecord = {
+  id: string; kind: Kind; title: string; date: string; amount: number; type: string;
+  category: string; details: string; target: number; phone: string; address: string;
+};
+type SaveRecord = Omit<DataRecord, "id">;
+
+const paths: Record<Kind, string> = {
+  transaction: "transactions", program: "programs", event: "events", member: "members",
+};
+const publicNav = [
+  ["beranda", "Beranda", Home],
+  ["program", "Program Donasi", HeartHandshake],
+  ["kegiatan", "Kegiatan", CalendarDays],
+] as const;
+const privateNav = [
+  ["keuangan", "Keuangan", Wallet],
+  ["jamaah", "Data Jamaah", Users],
+] as const;
+const money = (value: number) => new Intl.NumberFormat("id-ID", {
+  style: "currency", currency: "IDR", maximumFractionDigits: 0,
+}).format(value);
+
+function mapRecord(kind: Kind, item: QueryDocumentSnapshot<DocumentData>): DataRecord {
+  const data = item.data();
+  return {
+    id: item.id, kind, title: String(data.title ?? ""), date: String(data.date ?? ""),
+    amount: Number(data.amount ?? 0), type: String(data.type ?? ""),
+    category: String(data.category ?? ""), details: String(data.details ?? ""),
+    target: Number(data.target ?? 0), phone: String(data.phone ?? ""),
+    address: String(data.address ?? ""),
+  };
 }
 
-function Dashboard({go,donate}:{go:(v:View)=>void;donate:()=>void}){return <><section className="welcome"><div><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Ringkasan pengelolaan Masjid Baitul Fadi bulan September.</p></div><Button onClick={donate}><HeartHandshake/>Donasi Sekarang</Button></section><div className="stats"><Stat l="Saldo Kas" v={money(57725000)} n="Posisi per hari ini" icon={<Wallet/>} c="green"/><Stat l="Pemasukan Bulan Ini" v={money(86450000)} n="Naik 12,4% dari Agustus" icon={<ArrowDownLeft/>} c="blue"/><Stat l="Pengeluaran Bulan Ini" v={money(28725000)} n="33,2% dari pemasukan" icon={<ArrowUpRight/>} c="gold"/><Stat l="Jamaah Terdaftar" v="428" n="12 jamaah baru bulan ini" icon={<Users/>} c="navy"/></div><div className="dashboard-grid"><Panel t="Transaksi Terbaru" a="Lihat laporan" click={()=>go("keuangan")}><TransactionList/></Panel><Panel t="Program Berjalan" a="Lihat semua" click={()=>go("program")}><div className="mini-programs">{programs.slice(0,2).map(p=><ProgramLine key={p.name} p={p}/>)}</div></Panel><Panel t="Agenda Terdekat" a="Kalender" click={()=>go("kegiatan")}><EventList/></Panel><section className="quote"><b>“</b><p>Perumpamaan orang yang menginfakkan hartanya di jalan Allah seperti sebutir biji yang menumbuhkan tujuh tangkai.</p><small>QS. Al-Baqarah: 261</small></section></div></>}
-function Stat({l,v,n,icon,c}:{l:string;v:string;n:string;icon:React.ReactNode;c:string}){return <article className="stat"><span className={"stat-icon "+c}>{icon}</span><small>{l}</small><strong>{v}</strong><em>{n}</em></article>}
-function Panel({t,a,click,children}:{t:string;a:string;click?:()=>void;children:React.ReactNode}){return <section className="panel"><div className="panel-head"><h3>{t}</h3><button onClick={click}>{a}<ChevronRight/></button></div>{children}</section>}
-function TransactionList(){return <div>{trx.map(([n,d,v,isIn])=><div className="transaction" key={n}><span className={isIn?"in":"out"}>{isIn?<ArrowDownLeft/>:<ArrowUpRight/>}</span><div><strong>{n}</strong><small>{d}</small></div><b className={isIn?"plus":"minus"}>{isIn?"+":"−"}{money(v)}</b></div>)}</div>}
-function ProgramLine({p}:{p:typeof programs[number]}){const pct=Math.round(p.raised/p.target*100);return <div><div className="program-line"><strong>{p.name}</strong><span>{pct}%</span></div><Progress value={pct}/><small>{money(p.raised)} dari {money(p.target)}</small></div>}
-function EventList(){return <div>{events.map(([day,mon,n,d,tag])=><div className="event-row" key={n}><span className="date"><b>{day}</b><small>{mon}</small></span><div><strong>{n}</strong><small>{d}</small></div><em>{tag}</em></div>)}</div>}
-function Intro({k,t,p,children}:{k:string;t:string;p:string;children?:React.ReactNode}){return <div className="intro"><div><p className="eyebrow">{k}</p><h2>{t}</h2><p>{p}</p></div>{children}</div>}
+export default function Page() {
+  const [view, setView] = useState<View>("beranda");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [records, setRecords] = useState<DataRecord[]>([]);
+  const [form, setForm] = useState<Kind | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [donateOpen, setDonateOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [admin, setAdmin] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [error, setError] = useState("");
 
-function Finance({records,add,remove}:{records:DataRecord[];add:()=>void;remove:(id:number)=>void}){const own=records.filter(r=>r.kind==="transaction");return <div className="stack"><Intro k="TRANSPARAN & AKUNTABEL" t="Laporan Keuangan Masjid" p="Pantau arus dana masjid dengan ringkas dan mudah dipahami."><div className="actions"><Button variant="outline"><Download/>Unduh Laporan</Button><Button className="primary" onClick={add}><Plus/>Catat Transaksi</Button></div></Intro><div className="stats three"><Stat l="Total Pemasukan" v={money(own.filter(r=>r.type==="Pemasukan").reduce((a,r)=>a+r.amount,0))} n="Data yang diinput" icon={<ArrowDownLeft/>} c="green"/><Stat l="Total Pengeluaran" v={money(own.filter(r=>r.type==="Pengeluaran").reduce((a,r)=>a+r.amount,0))} n="Data yang diinput" icon={<ArrowUpRight/>} c="gold"/><Stat l="Jumlah Transaksi" v={String(own.length)} n="Tersimpan permanen" icon={<Wallet/>} c="navy"/></div><Panel t="Daftar Transaksi" a={own.length+" transaksi"}><div className="table"><div className="tr th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span>Nominal</span><span/></div>{own.map(r=><div className="tr" key={r.id}><span><i className={"dot "+(r.type==="Pemasukan"?"in":"out")}/><strong>{r.title}</strong></span><span>{r.date}</span><span><em>{r.category||"-"}</em></span><b className={r.type==="Pemasukan"?"plus":"minus"}>{r.type==="Pemasukan"?"+":"−"}{money(r.amount)}</b><button onClick={()=>remove(r.id)} aria-label="Hapus"><Trash2/></button></div>)}{!own.length&&<p className="empty">Belum ada transaksi. Klik “Catat Transaksi” untuk mulai.</p>}</div></Panel></div>}
-function Programs({records,add,donate,remove}:{records:DataRecord[];add:()=>void;donate:()=>void;remove:(id:number)=>void}){const own=records.filter(r=>r.kind==="program");return <div className="stack"><Intro k="PROGRAM KEBAIKAN" t="Tumbuhkan Manfaat Bersama" p="Setiap rupiah dikelola untuk kebutuhan jamaah dan kemakmuran masjid."><div className="actions"><Button variant="outline" onClick={add}><Plus/>Tambah Program</Button><Button className="gold-btn" onClick={donate}><HeartHandshake/>Donasi Sekarang</Button></div></Intro><div className="program-cards">{own.map((r,i)=>{const pct=r.target?Math.round(r.amount/r.target*100):0;return <article key={r.id}><div className={"program-top "+(["emerald","amber","blue"][i%3])}><span><Landmark/></span><b>{r.category||"Program"}</b></div><div className="program-body"><h3>{r.title}</h3><p>{r.details||"Program kebaikan Masjid Baitul Fadi."}</p><div className="program-line"><strong>{money(r.amount)}</strong><span>{pct}%</span></div><Progress value={pct}/><small>Target {money(r.target)}</small><div className="card-actions"><Button variant="outline" onClick={donate}>Donasi<ChevronRight/></Button><Button variant="outline" onClick={()=>remove(r.id)}><Trash2/></Button></div></div></article>})}{!own.length&&<p className="empty">Belum ada program. Klik “Tambah Program”.</p>}</div></div>}
-function Events({records,add,remove}:{records:DataRecord[];add:()=>void;remove:(id:number)=>void}){const own=records.filter(r=>r.kind==="event");return <div className="stack"><Intro k="AGENDA MASJID" t="Hidupkan Masjid, Eratkan Ukhuwah" p="Jadwal ibadah, pendidikan, dan kegiatan sosial untuk seluruh jamaah."><Button className="primary" onClick={add}><Plus/>Tambah Kegiatan</Button></Intro><div className="event-cards">{own.map(r=><article key={r.id}><span className="date large"><small>{r.date.slice(5,7)||"BLN"}</small><b>{r.date.slice(8,10)||"--"}</b></span><div><em>{r.category||"Kegiatan"}</em><h3>{r.title}</h3><p>{r.details}</p></div><button onClick={()=>remove(r.id)}><Trash2/></button></article>)}{!own.length&&<p className="empty">Belum ada kegiatan. Klik “Tambah Kegiatan”.</p>}</div></div>}
-function Members({records,add,remove}:{records:DataRecord[];add:()=>void;remove:(id:number)=>void}){const own=records.filter(r=>r.kind==="member");return <div className="stack"><Intro k="DATABASE JAMAAH" t="Jamaah Masjid Baitul Fadi" p="Data jamaah untuk komunikasi kegiatan dan pelayanan yang lebih baik."><Button className="primary" onClick={add}><Plus/>Tambah Jamaah</Button></Intro><div className="stats three"><Stat l="Total Jamaah" v={String(own.length)} n="Data tersimpan" icon={<Users/>} c="green"/><Stat l="Relawan" v={String(own.filter(r=>r.category==="Relawan").length)} n="Siap membantu" icon={<HeartHandshake/>} c="blue"/><Stat l="Kepala Keluarga" v={String(own.filter(r=>r.type==="Kepala Keluarga").length)} n="Terdata" icon={<Home/>} c="gold"/></div><Panel t="Daftar Jamaah" a={own.length+" jamaah"}><div className="members">{own.map(r=><article key={r.id}><span>{r.title.split(" ").map(x=>x[0]).slice(0,2).join("")}</span><div><strong>{r.title}</strong><small>{r.phone||"-"} · {r.address||"-"}</small></div><button onClick={()=>remove(r.id)}><Trash2/></button></article>)}{!own.length&&<p className="empty">Belum ada jamaah. Klik “Tambah Jamaah”.</p>}</div></Panel></div>}
+  useEffect(() => onAuthStateChanged(auth, async (currentUser) => {
+    setUser(currentUser);
+    setAdmin(false);
+    if (!currentUser) {
+      setRecords((current) => current.filter((item) => item.kind === "program" || item.kind === "event"));
+    }
+    if (currentUser) {
+      try {
+        const status = await getDoc(doc(db, "admins", currentUser.uid));
+        setAdmin(status.exists() && status.data().active === true);
+      } catch {
+        setError("Status pengurus tidak dapat diverifikasi.");
+      }
+    }
+    setAuthReady(true);
+  }), []);
 
-function EntryForm({kind,close,save}:{kind:Kind;close:()=>void;save:(d:Omit<DataRecord,"id">)=>Promise<void>}){
- const [title,setTitle]=useState(""),[date,setDate]=useState(""),[amount,setAmount]=useState(0),[target,setTarget]=useState(0),[type,setType]=useState(kind==="transaction"?"Pemasukan":kind==="member"?"Jamaah":""),[category,setCategory]=useState(""),[details,setDetails]=useState(""),[phone,setPhone]=useState(""),[address,setAddress]=useState(""),[busy,setBusy]=useState(false),[error,setError]=useState("");
- const labels={transaction:"Transaksi",program:"Program Donasi",event:"Kegiatan",member:"Jamaah"};
- async function submit(e:React.FormEvent){e.preventDefault();if(!title)return setError("Nama/judul wajib diisi.");setBusy(true);setError("");try{await save({kind,title,date,amount,type,category,details,target,phone,address})}catch(err){setError(err instanceof Error?err.message:"Gagal menyimpan")}finally{setBusy(false)}}
- return <div className="modal-wrap"><button className="backdrop" onClick={close}/><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X/></button><p className="eyebrow">INPUT DATA</p><h2>Tambah {labels[kind]}</h2>
-  <label className="field">{kind==="member"?"Nama lengkap":"Nama / judul"}<input value={title} onChange={e=>setTitle(e.target.value)} placeholder={kind==="transaction"?"Contoh: Infak Jumat":kind==="member"?"Nama jamaah":"Tuliskan nama"}/></label>
-  {(kind==="transaction"||kind==="event")&&<label className="field">Tanggal<input type="date" value={date} onChange={e=>setDate(e.target.value)}/></label>}
-  {kind==="transaction"&&<><label className="field">Jenis<select value={type} onChange={e=>setType(e.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><label className="field">Nominal<input type="number" value={amount||""} onChange={e=>setAmount(Number(e.target.value))} placeholder="0"/></label></>}
-  {kind==="program"&&<><label className="field">Dana terkumpul<input type="number" value={amount||""} onChange={e=>setAmount(Number(e.target.value))}/></label><label className="field">Target dana<input type="number" value={target||""} onChange={e=>setTarget(Number(e.target.value))}/></label></>}
-  {kind==="member"&&<><label className="field">Nomor WhatsApp<input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="08xxxxxxxxxx"/></label><label className="field">Alamat / RT<input value={address} onChange={e=>setAddress(e.target.value)} placeholder="RT 01 / RW 02"/></label><label className="field">Status<select value={type} onChange={e=>setType(e.target.value)}><option>Jamaah</option><option>Kepala Keluarga</option></select></label></>}
-  <label className="field">Kategori<select value={category} onChange={e=>setCategory(e.target.value)}><option value="">Pilih kategori</option>{kind==="transaction"?<><option>Infak</option><option>Operasional</option><option>Sosial</option><option>Pembangunan</option></>:kind==="program"?<><option>Fasilitas</option><option>Sosial</option><option>Operasional</option></>:kind==="event"?<><option>Kajian</option><option>Sosial</option><option>Pendidikan</option></>:<><option>Jamaah</option><option>Relawan</option></>}</select></label>
-  {kind!=="member"&&<label className="field">Keterangan<textarea value={details} onChange={e=>setDetails(e.target.value)} placeholder="Tambahkan rincian"/></label>}
-  {error&&<p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy?"Menyimpan...":"Simpan Data"}</Button>
- </form></div>
+  useEffect(() => {
+    const unsubscribers: Unsubscribe[] = [];
+    const subscribe = (kind: Kind) => {
+      const source = query(collection(db, paths[kind]), orderBy("createdAt", "desc"));
+      unsubscribers.push(onSnapshot(source, (snapshot) => {
+        const next = snapshot.docs.map((item) => mapRecord(kind, item));
+        setRecords((current) => [...current.filter((item) => item.kind !== kind), ...next]);
+        setError("");
+      }, () => setError("Sebagian data belum dapat dimuat. Silakan muat ulang halaman.")));
+    };
+    subscribe("program");
+    subscribe("event");
+    if (admin) {
+      subscribe("transaction");
+      subscribe("member");
+    }
+    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
+  }, [admin]);
+
+  async function login(email: string, password: string) {
+    const credential = await signInWithEmailAndPassword(auth, email, password);
+    const status = await getDoc(doc(db, "admins", credential.user.uid));
+    if (!status.exists() || status.data().active !== true) {
+      await signOut(auth);
+      throw new Error("Akun bukan pengurus aktif.");
+    }
+    setLoginOpen(false);
+  }
+  async function logout() {
+    await signOut(auth);
+    setAdmin(false);
+    if (view === "keuangan" || view === "jamaah") setView("beranda");
+  }
+  async function save(data: SaveRecord) {
+    if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
+    await addDoc(collection(db, paths[data.kind]), {
+      ...data, createdAt: serverTimestamp(), createdBy: user.uid,
+    });
+    setForm(null);
+  }
+  async function remove(record: DataRecord) {
+    if (!admin || !confirm("Hapus data ini?")) return;
+    await deleteDoc(doc(db, paths[record.kind], record.id));
+  }
+
+  const nav = admin ? [...publicNav, ...privateNav] : publicNav;
+  const title = nav.find(([id]) => id === view)?.[1] ?? "Beranda";
+  return <div className="shell">
+    <aside className={"sidebar " + (menuOpen ? "open" : "")}>
+      <button className="close" onClick={() => setMenuOpen(false)} aria-label="Tutup menu"><X /></button>
+      <div className="brand"><span><Landmark /></span><div><strong>Masjid Baitul Fadi</strong><small>Pusat Layanan Jamaah</small></div></div>
+      <p className="caption">MENU UTAMA</p>
+      <nav>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon />{label}</button>)}</nav>
+      <div className="sidebar-foot"><button><Settings />Pengaturan</button><section><ShieldCheck /><strong>{admin ? "Mode pengurus aktif" : "Data masjid aman"}</strong><small>{admin ? "Anda dapat mengelola data masjid." : "Data pribadi hanya dapat dibuka pengurus."}</small></section></div>
+    </aside>
+    {menuOpen && <button className="overlay" onClick={() => setMenuOpen(false)} aria-label="Tutup menu" />}
+    <main>
+      <header>
+        <div className="heading"><button className="hamb" onClick={() => setMenuOpen(true)} aria-label="Buka menu"><Menu /></button><div><small>Terhubung ke Firebase</small><h1>{title}</h1></div></div>
+        <div className="tools">{admin ? <><span className="role-badge">Pengurus</span><Button variant="outline" onClick={logout}><LogOut />Keluar</Button><span className="avatar">{user?.email?.slice(0, 2).toUpperCase() ?? "PG"}</span></> : <Button variant="outline" disabled={!authReady} onClick={() => setLoginOpen(true)}><LogIn />Masuk Pengurus</Button>}</div>
+      </header>
+      <div className="page">
+        {error && <p className="data-alert">{error}</p>}
+        {view === "beranda" ? <Dashboard records={records} admin={admin} go={setView} donate={() => setDonateOpen(true)} />
+          : view === "keuangan" && admin ? <Finance records={records} add={() => setForm("transaction")} remove={remove} />
+          : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
+          : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} remove={remove} />
+          : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} remove={remove} />
+          : <Dashboard records={records} admin={admin} go={setView} donate={() => setDonateOpen(true)} />}
+      </div>
+    </main>
+    {form && <EntryForm kind={form} close={() => setForm(null)} save={save} />}
+    {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
+    {donateOpen && <DonationModal close={() => setDonateOpen(false)} />}
+  </div>;
+}
+
+function Dashboard({ records, admin, go, donate }: { records: DataRecord[]; admin: boolean; go: (view: View) => void; donate: () => void }) {
+  const transactions = records.filter((item) => item.kind === "transaction");
+  const programs = records.filter((item) => item.kind === "program");
+  const events = records.filter((item) => item.kind === "event");
+  const members = records.filter((item) => item.kind === "member");
+  const income = transactions.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
+  const expense = transactions.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
+  const raised = programs.reduce((sum, item) => sum + item.amount, 0);
+  return <>
+    <section className="welcome"><div><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan dan program Masjid Baitul Fadi.</p></div><Button onClick={donate}><HeartHandshake />Donasi Sekarang</Button></section>
+    <div className="stats">{admin ? <>
+      <Stat label="Saldo Kas" value={money(income - expense)} note="Berdasarkan transaksi" icon={<Wallet />} color="green" />
+      <Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="blue" />
+      <Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" />
+      <Stat label="Jamaah Terdaftar" value={String(members.length)} note="Data pengurus" icon={<Users />} color="navy" />
+    </> : <>
+      <Stat label="Program Berjalan" value={String(programs.length)} note="Program kebaikan" icon={<HeartHandshake />} color="green" />
+      <Stat label="Dana Program" value={money(raised)} note="Dana terkumpul" icon={<Wallet />} color="blue" />
+      <Stat label="Agenda" value={String(events.length)} note="Kegiatan terdaftar" icon={<CalendarDays />} color="gold" />
+      <Stat label="Akses" value="Jamaah" note="Informasi publik" icon={<Users />} color="navy" />
+    </>}</div>
+    <div className="dashboard-grid">
+      {admin && <Panel title="Transaksi Terbaru" action="Lihat laporan" onAction={() => go("keuangan")}><TransactionList records={transactions.slice(0, 4)} /></Panel>}
+      <Panel title="Program Berjalan" action="Lihat semua" onAction={() => go("program")}><ProgramList records={programs.slice(0, 3)} /></Panel>
+      <Panel title="Agenda Terdekat" action="Lihat agenda" onAction={() => go("kegiatan")}><EventList records={events.slice(0, 4)} /></Panel>
+      <section className="quote"><b>“</b><p>Perumpamaan orang yang menginfakkan hartanya di jalan Allah seperti sebutir biji yang menumbuhkan tujuh tangkai.</p><small>QS. Al-Baqarah: 261</small></section>
+    </div>
+  </>;
+}
+
+function Stat({ label, value, note, icon, color }: { label: string; value: string; note: string; icon: React.ReactNode; color: string }) {
+  return <article className="stat"><span className={"stat-icon " + color}>{icon}</span><small>{label}</small><strong>{value}</strong><em>{note}</em></article>;
+}
+function Panel({ title, action, onAction, children }: { title: string; action: string; onAction?: () => void; children: React.ReactNode }) {
+  return <section className="panel"><div className="panel-head"><h3>{title}</h3><button onClick={onAction}>{action}<ChevronRight /></button></div>{children}</section>;
+}
+function TransactionList({ records }: { records: DataRecord[] }) {
+  if (!records.length) return <p className="empty">Belum ada transaksi.</p>;
+  return <div>{records.map((item) => { const incoming = item.type === "Pemasukan"; return <div className="transaction" key={item.id}><span className={incoming ? "in" : "out"}>{incoming ? <ArrowDownLeft /> : <ArrowUpRight />}</span><div><strong>{item.title}</strong><small>{item.date || "Tanpa tanggal"}</small></div><b className={incoming ? "plus" : "minus"}>{incoming ? "+" : "−"}{money(item.amount)}</b></div>; })}</div>;
+}
+function ProgramList({ records }: { records: DataRecord[] }) {
+  if (!records.length) return <p className="empty">Belum ada program yang dipublikasikan.</p>;
+  return <div className="mini-programs">{records.map((item) => { const pct = item.target ? Math.min(100, Math.round(item.amount / item.target * 100)) : 0; return <div key={item.id}><div className="program-line"><strong>{item.title}</strong><span>{pct}%</span></div><Progress value={pct} /><small>{money(item.amount)} dari {money(item.target)}</small></div>; })}</div>;
+}
+function EventList({ records }: { records: DataRecord[] }) {
+  if (!records.length) return <p className="empty">Belum ada agenda yang dipublikasikan.</p>;
+  return <div>{records.map((item) => <div className="event-row" key={item.id}><span className="date"><b>{item.date.slice(8, 10) || "--"}</b><small>{item.date.slice(5, 7) || "BLN"}</small></span><div><strong>{item.title}</strong><small>{item.details || "Informasi menyusul"}</small></div><em>{item.category || "Kegiatan"}</em></div>)}</div>;
+}
+function Intro({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {
+  return <div className="intro"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{description}</p></div>{children}</div>;
+}
+
+function Finance({ records, add, remove }: { records: DataRecord[]; add: () => void; remove: (record: DataRecord) => void }) {
+  const items = records.filter((item) => item.kind === "transaction");
+  const income = items.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
+  const expense = items.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
+  return <div className="stack"><Intro eyebrow="TRANSPARAN & AKUNTABEL" title="Laporan Keuangan Masjid" description="Data keuangan hanya dapat dibuka dan dikelola oleh pengurus."><Button className="primary" onClick={add}><Plus />Catat Transaksi</Button></Intro><div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div><Panel title="Daftar Transaksi" action={items.length + " transaksi"}><div className="table"><div className="tr th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span>Nominal</span><span /></div>{items.map((item) => <div className="tr" key={item.id}><span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span><span>{item.date || "-"}</span><span><em>{item.category || "-"}</em></span><b className={item.type === "Pemasukan" ? "plus" : "minus"}>{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</b><button onClick={() => remove(item)} aria-label="Hapus transaksi"><Trash2 /></button></div>)}{!items.length && <p className="empty">Belum ada transaksi.</p>}</div></Panel></div>;
+}
+function Programs({ records, admin, add, donate, remove }: { records: DataRecord[]; admin: boolean; add: () => void; donate: () => void; remove: (record: DataRecord) => void }) {
+  const items = records.filter((item) => item.kind === "program");
+  return <div className="stack"><Intro eyebrow="PROGRAM KEBAIKAN" title="Tumbuhkan Manfaat Bersama" description="Setiap rupiah dikelola untuk kebutuhan jamaah dan kemakmuran masjid."><div className="actions">{admin && <Button variant="outline" onClick={add}><Plus />Tambah Program</Button>}<Button className="gold-btn" onClick={donate}><HeartHandshake />Donasi Sekarang</Button></div></Intro><div className="program-cards">{items.map((item, index) => { const pct = item.target ? Math.min(100, Math.round(item.amount / item.target * 100)) : 0; return <article key={item.id}><div className={"program-top " + ["emerald", "amber", "blue"][index % 3]}><span><Landmark /></span><b>{item.category || "Program"}</b></div><div className="program-body"><h3>{item.title}</h3><p>{item.details || "Program kebaikan Masjid Baitul Fadi."}</p><div className="program-line"><strong>{money(item.amount)}</strong><span>{pct}%</span></div><Progress value={pct} /><small>Target {money(item.target)}</small><div className="card-actions"><Button variant="outline" onClick={donate}>Donasi<ChevronRight /></Button>{admin && <Button variant="outline" onClick={() => remove(item)} aria-label="Hapus program"><Trash2 /></Button>}</div></div></article>; })}{!items.length && <p className="empty">Belum ada program yang dipublikasikan.</p>}</div></div>;
+}
+function Events({ records, admin, add, remove }: { records: DataRecord[]; admin: boolean; add: () => void; remove: (record: DataRecord) => void }) {
+  const items = records.filter((item) => item.kind === "event");
+  return <div className="stack"><Intro eyebrow="AGENDA MASJID" title="Hidupkan Masjid, Eratkan Ukhuwah" description="Jadwal ibadah, pendidikan, dan kegiatan sosial untuk seluruh jamaah.">{admin && <Button className="primary" onClick={add}><Plus />Tambah Kegiatan</Button>}</Intro><div className="event-cards">{items.map((item) => <article key={item.id}><span className="date large"><small>{item.date.slice(5, 7) || "BLN"}</small><b>{item.date.slice(8, 10) || "--"}</b></span><div><em>{item.category || "Kegiatan"}</em><h3>{item.title}</h3><p>{item.details}</p></div>{admin && <button onClick={() => remove(item)} aria-label="Hapus kegiatan"><Trash2 /></button>}</article>)}{!items.length && <p className="empty">Belum ada kegiatan yang dipublikasikan.</p>}</div></div>;
+}
+function Members({ records, add, remove }: { records: DataRecord[]; add: () => void; remove: (record: DataRecord) => void }) {
+  const items = records.filter((item) => item.kind === "member");
+  return <div className="stack"><Intro eyebrow="DATABASE JAMAAH" title="Jamaah Masjid Baitul Fadi" description="Data pribadi jamaah hanya dapat dibuka pengurus."><Button className="primary" onClick={add}><Plus />Tambah Jamaah</Button></Intro><div className="stats three"><Stat label="Total Jamaah" value={String(items.length)} note="Data Firestore" icon={<Users />} color="green" /><Stat label="Relawan" value={String(items.filter((item) => item.category === "Relawan").length)} note="Siap membantu" icon={<HeartHandshake />} color="blue" /><Stat label="Kepala Keluarga" value={String(items.filter((item) => item.type === "Kepala Keluarga").length)} note="Terdata" icon={<Home />} color="gold" /></div><Panel title="Daftar Jamaah" action={items.length + " jamaah"}><div className="members">{items.map((item) => <article key={item.id}><span>{item.title.split(" ").map((word) => word[0]).slice(0, 2).join("")}</span><div><strong>{item.title}</strong><small>{item.phone || "-"} · {item.address || "-"}</small></div><button onClick={() => remove(item)} aria-label="Hapus jamaah"><Trash2 /></button></article>)}{!items.length && <p className="empty">Belum ada jamaah.</p>}</div></Panel></div>;
+}
+
+function EntryForm({ kind, close, save }: { kind: Kind; close: () => void; save: (data: SaveRecord) => Promise<void> }) {
+  const [title, setTitle] = useState(""); const [date, setDate] = useState("");
+  const [amount, setAmount] = useState(0); const [target, setTarget] = useState(0);
+  const [type, setType] = useState(kind === "transaction" ? "Pemasukan" : kind === "member" ? "Jamaah" : "");
+  const [category, setCategory] = useState(""); const [details, setDetails] = useState("");
+  const [phone, setPhone] = useState(""); const [address, setAddress] = useState("");
+  const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  const labels = { transaction: "Transaksi", program: "Program Donasi", event: "Kegiatan", member: "Jamaah" };
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!title) return setError("Nama/judul wajib diisi.");
+    setBusy(true); setError("");
+    try { await save({ kind, title, date, amount, type, category, details, target, phone, address }); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Gagal menyimpan data."); }
+    finally { setBusy(false); }
+  }
+  const options = kind === "transaction" ? ["Infak", "Operasional", "Sosial", "Pembangunan"] : kind === "program" ? ["Fasilitas", "Sosial", "Operasional"] : kind === "event" ? ["Kajian", "Sosial", "Pendidikan"] : ["Jamaah", "Relawan"];
+  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>Tambah {labels[kind]}</h2><label className="field">{kind === "member" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "transaction" && <><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status<select value={type} onChange={(event) => setType(event.target.value)}><option>Jamaah</option><option>Kepala Keluarga</option></select></label></>}<label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : "Simpan Data"}</Button></form></div>;
+}
+function NumberField({ label, value, setValue }: { label: string; value: number; setValue: (value: number) => void }) {
+  return <label className="field">{label}<input type="number" min="0" value={value || ""} onChange={(event) => setValue(Number(event.target.value))} /></label>;
+}
+function LoginModal({ close, login }: { close: () => void; login: (email: string, password: string) => Promise<void> }) {
+  const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setBusy(true); setError("");
+    try { await login(email, password); } catch { setError("Email atau password salah, atau akun bukan pengurus aktif."); } finally { setBusy(false); }
+  }
+  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal login-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">AKSES TERBATAS</p><h2>Masuk sebagai Pengurus</h2><p>Gunakan akun yang telah didaftarkan oleh administrator masjid.</p><label className="field">Email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field">Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Memeriksa..." : "Masuk"}</Button></form></div>;
+}
+function DonationModal({ close }: { close: () => void }) {
+  const [amount, setAmount] = useState(100000); const [done, setDone] = useState(false);
+  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><section className="modal"><button className="modal-x" onClick={close}><X /></button>{done ? <div className="success"><span><CheckCircle2 /></span><h2>Jazakumullahu khairan</h2><p>Silakan hubungi pengurus untuk memperoleh rekening resmi dan konfirmasi donasi.</p><div><small>Nominal yang dipilih</small><strong>{money(amount)}</strong></div><Button onClick={close}>Selesai</Button></div> : <><p className="eyebrow">DONASI MASJID</p><h2>Mulai kebaikan hari ini</h2><p>Pilih nominal donasi. Pastikan transfer hanya ke rekening resmi yang disampaikan pengurus.</p><div className="amounts">{[50000, 100000, 250000, 500000].map((value) => <button className={amount === value ? "chosen" : ""} onClick={() => setAmount(value)} key={value}>{money(value)}</button>)}</div><NumberField label="Nominal lainnya" value={amount} setValue={setAmount} /><Button className="primary" onClick={() => setDone(true)}>Lanjutkan <ChevronRight /></Button></>}</section></div>;
 }
