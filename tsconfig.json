@@ -41,7 +41,10 @@
     "**/*.mts"
   ],
   "exclude": [
-    "node_modules",
-    "examples"
+  "node_modules",
+  "examples",
+  "vite.config.ts",
+  "build",
+  "scripts"
   ]
 }
