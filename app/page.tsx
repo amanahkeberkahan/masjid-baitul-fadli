@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import type { User } from "firebase/auth";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import {
@@ -16,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { auth, db } from "@/lib/firebase";
 
-type View = "beranda" | "keuangan" | "program" | "kegiatan" | "jamaah";
+type View = "beranda" | "keuangan" | "program" | "kegiatan" | "jamaah" | "pengaturan";
 type Kind = "transaction" | "program" | "event" | "member";
 type DataRecord = {
   id: string; kind: Kind; title: string; date: string; amount: number; type: string;
@@ -111,7 +112,7 @@ export default function Page() {
   async function logout() {
     await signOut(auth);
     setAdmin(false);
-    if (view === "keuangan" || view === "jamaah") setView("beranda");
+    if (view === "keuangan" || view === "jamaah" || view === "pengaturan") setView("beranda");
   }
   async function save(data: SaveRecord) {
     if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
@@ -126,20 +127,20 @@ export default function Page() {
   }
 
   const nav = admin ? [...publicNav, ...privateNav] : publicNav;
-  const title = nav.find(([id]) => id === view)?.[1] ?? "Beranda";
+  const title = view === "pengaturan" ? "Pengaturan" : nav.find(([id]) => id === view)?.[1] ?? "Beranda";
   return <div className="shell">
     <aside className={"sidebar " + (menuOpen ? "open" : "")}>
       <button className="close" onClick={() => setMenuOpen(false)} aria-label="Tutup menu"><X /></button>
-      <div className="brand"><span><Landmark /></span><div><strong>Masjid Baitul Fadi</strong><small>Pusat Layanan Jamaah</small></div></div>
+      <div className="brand"><Image src="/logo-baitul-fadli.webp" alt="Masjid Baitul Fadli" width={500} height={500} priority /></div>
       <p className="caption">MENU UTAMA</p>
       <nav>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => { setView(id); setMenuOpen(false); }}><Icon />{label}</button>)}</nav>
-      <div className="sidebar-foot"><button><Settings />Pengaturan</button><section><ShieldCheck /><strong>{admin ? "Mode pengurus aktif" : "Data masjid aman"}</strong><small>{admin ? "Anda dapat mengelola data masjid." : "Data pribadi hanya dapat dibuka pengurus."}</small></section></div>
+      <div className="sidebar-foot"><button className={view === "pengaturan" ? "active" : ""} onClick={() => { if (admin) setView("pengaturan"); else setLoginOpen(true); setMenuOpen(false); }}><Settings />Pengaturan</button><section><ShieldCheck /><strong>{admin ? "Mode pengurus aktif" : "Data masjid aman"}</strong><small>{admin ? "Anda dapat mengelola data masjid." : "Data pribadi hanya dapat dibuka pengurus."}</small></section></div>
     </aside>
     {menuOpen && <button className="overlay" onClick={() => setMenuOpen(false)} aria-label="Tutup menu" />}
     <main>
       <header>
         <div className="heading"><button className="hamb" onClick={() => setMenuOpen(true)} aria-label="Buka menu"><Menu /></button><div><small>Terhubung ke Firebase</small><h1>{title}</h1></div></div>
-        <div className="tools">{admin ? <><span className="role-badge">Pengurus</span><Button variant="outline" onClick={logout}><LogOut />Keluar</Button><span className="avatar">{user?.email?.slice(0, 2).toUpperCase() ?? "PG"}</span></> : <Button variant="outline" disabled={!authReady} onClick={() => setLoginOpen(true)}><LogIn />Masuk Pengurus</Button>}</div>
+        <div className="tools">{admin ? <><Button variant="outline" onClick={logout}><LogOut />Keluar</Button><span className="avatar">{user?.email?.slice(0, 2).toUpperCase() ?? "PG"}</span></> : <Button variant="outline" disabled={!authReady} onClick={() => setLoginOpen(true)}><LogIn />Masuk Pengurus</Button>}</div>
       </header>
       <div className="page">
         {error && <p className="data-alert">{error}</p>}
@@ -148,6 +149,7 @@ export default function Page() {
           : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} remove={remove} />
           : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} remove={remove} />
+          : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} />
           : <Dashboard records={records} admin={admin} go={setView} donate={() => setDonateOpen(true)} />}
       </div>
     </main>
@@ -166,7 +168,7 @@ function Dashboard({ records, admin, go, donate }: { records: DataRecord[]; admi
   const expense = transactions.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
   const raised = programs.reduce((sum, item) => sum + item.amount, 0);
   return <>
-    <section className="welcome"><div><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan dan program Masjid Baitul Fadi.</p></div><Button onClick={donate}><HeartHandshake />Donasi Sekarang</Button></section>
+    <section className="welcome"><div><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan dan program Masjid Baitul Fadli.</p></div><Button onClick={donate}><HeartHandshake />Donasi Sekarang</Button></section>
     <div className="stats">{admin ? <>
       <Stat label="Saldo Kas" value={money(income - expense)} note="Berdasarkan transaksi" icon={<Wallet />} color="green" />
       <Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="blue" />
@@ -185,6 +187,17 @@ function Dashboard({ records, admin, go, donate }: { records: DataRecord[]; admi
       <section className="quote"><b>“</b><p>Perumpamaan orang yang menginfakkan hartanya di jalan Allah seperti sebutir biji yang menumbuhkan tujuh tangkai.</p><small>QS. Al-Baqarah: 261</small></section>
     </div>
   </>;
+}
+
+function SettingsPage({ user, logout }: { user: User; logout: () => Promise<void> }) {
+  return <div className="stack">
+    <Intro eyebrow="PENGATURAN AKUN" title="Pengaturan Pengurus" description="Informasi akun dan koneksi penyimpanan aplikasi Masjid Baitul Fadli." />
+    <div className="settings-grid">
+      <section className="setting-card"><span><ShieldCheck /></span><div><small>AKUN AKTIF</small><h3>{user.email}</h3><p>Akun ini terdaftar sebagai pengurus aktif dan dapat mengelola data masjid.</p></div></section>
+      <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Firebase Firestore</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>
+      <section className="setting-card wide"><span><Landmark /></span><div><small>IDENTITAS APLIKASI</small><h3>Masjid Baitul Fadli</h3><p>Logo resmi dan nama masjid telah diterapkan pada tampilan aplikasi.</p></div><Button variant="outline" onClick={logout}><LogOut />Keluar dari akun</Button></section>
+    </div>
+  </div>;
 }
 
 function Stat({ label, value, note, icon, color }: { label: string; value: string; note: string; icon: React.ReactNode; color: string }) {
@@ -217,7 +230,7 @@ function Finance({ records, add, remove }: { records: DataRecord[]; add: () => v
 }
 function Programs({ records, admin, add, donate, remove }: { records: DataRecord[]; admin: boolean; add: () => void; donate: () => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "program");
-  return <div className="stack"><Intro eyebrow="PROGRAM KEBAIKAN" title="Tumbuhkan Manfaat Bersama" description="Setiap rupiah dikelola untuk kebutuhan jamaah dan kemakmuran masjid."><div className="actions">{admin && <Button variant="outline" onClick={add}><Plus />Tambah Program</Button>}<Button className="gold-btn" onClick={donate}><HeartHandshake />Donasi Sekarang</Button></div></Intro><div className="program-cards">{items.map((item, index) => { const pct = item.target ? Math.min(100, Math.round(item.amount / item.target * 100)) : 0; return <article key={item.id}><div className={"program-top " + ["emerald", "amber", "blue"][index % 3]}><span><Landmark /></span><b>{item.category || "Program"}</b></div><div className="program-body"><h3>{item.title}</h3><p>{item.details || "Program kebaikan Masjid Baitul Fadi."}</p><div className="program-line"><strong>{money(item.amount)}</strong><span>{pct}%</span></div><Progress value={pct} /><small>Target {money(item.target)}</small><div className="card-actions"><Button variant="outline" onClick={donate}>Donasi<ChevronRight /></Button>{admin && <Button variant="outline" onClick={() => remove(item)} aria-label="Hapus program"><Trash2 /></Button>}</div></div></article>; })}{!items.length && <p className="empty">Belum ada program yang dipublikasikan.</p>}</div></div>;
+  return <div className="stack"><Intro eyebrow="PROGRAM KEBAIKAN" title="Tumbuhkan Manfaat Bersama" description="Setiap rupiah dikelola untuk kebutuhan jamaah dan kemakmuran masjid."><div className="actions">{admin && <Button variant="outline" onClick={add}><Plus />Tambah Program</Button>}<Button className="gold-btn" onClick={donate}><HeartHandshake />Donasi Sekarang</Button></div></Intro><div className="program-cards">{items.map((item, index) => { const pct = item.target ? Math.min(100, Math.round(item.amount / item.target * 100)) : 0; return <article key={item.id}><div className={"program-top " + ["emerald", "amber", "blue"][index % 3]}><span><Landmark /></span><b>{item.category || "Program"}</b></div><div className="program-body"><h3>{item.title}</h3><p>{item.details || "Program kebaikan Masjid Baitul Fadli."}</p><div className="program-line"><strong>{money(item.amount)}</strong><span>{pct}%</span></div><Progress value={pct} /><small>Target {money(item.target)}</small><div className="card-actions"><Button variant="outline" onClick={donate}>Donasi<ChevronRight /></Button>{admin && <Button variant="outline" onClick={() => remove(item)} aria-label="Hapus program"><Trash2 /></Button>}</div></div></article>; })}{!items.length && <p className="empty">Belum ada program yang dipublikasikan.</p>}</div></div>;
 }
 function Events({ records, admin, add, remove }: { records: DataRecord[]; admin: boolean; add: () => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "event");
@@ -225,7 +238,7 @@ function Events({ records, admin, add, remove }: { records: DataRecord[]; admin:
 }
 function Members({ records, add, remove }: { records: DataRecord[]; add: () => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "member");
-  return <div className="stack"><Intro eyebrow="DATABASE JAMAAH" title="Jamaah Masjid Baitul Fadi" description="Data pribadi jamaah hanya dapat dibuka pengurus."><Button className="primary" onClick={add}><Plus />Tambah Jamaah</Button></Intro><div className="stats three"><Stat label="Total Jamaah" value={String(items.length)} note="Data Firestore" icon={<Users />} color="green" /><Stat label="Relawan" value={String(items.filter((item) => item.category === "Relawan").length)} note="Siap membantu" icon={<HeartHandshake />} color="blue" /><Stat label="Kepala Keluarga" value={String(items.filter((item) => item.type === "Kepala Keluarga").length)} note="Terdata" icon={<Home />} color="gold" /></div><Panel title="Daftar Jamaah" action={items.length + " jamaah"}><div className="members">{items.map((item) => <article key={item.id}><span>{item.title.split(" ").map((word) => word[0]).slice(0, 2).join("")}</span><div><strong>{item.title}</strong><small>{item.phone || "-"} · {item.address || "-"}</small></div><button onClick={() => remove(item)} aria-label="Hapus jamaah"><Trash2 /></button></article>)}{!items.length && <p className="empty">Belum ada jamaah.</p>}</div></Panel></div>;
+  return <div className="stack"><Intro eyebrow="DATABASE JAMAAH" title="Jamaah Masjid Baitul Fadli" description="Data pribadi jamaah hanya dapat dibuka pengurus."><Button className="primary" onClick={add}><Plus />Tambah Jamaah</Button></Intro><div className="stats three"><Stat label="Total Jamaah" value={String(items.length)} note="Data Firestore" icon={<Users />} color="green" /><Stat label="Relawan" value={String(items.filter((item) => item.category === "Relawan").length)} note="Siap membantu" icon={<HeartHandshake />} color="blue" /><Stat label="Kepala Keluarga" value={String(items.filter((item) => item.type === "Kepala Keluarga").length)} note="Terdata" icon={<Home />} color="gold" /></div><Panel title="Daftar Jamaah" action={items.length + " jamaah"}><div className="members">{items.map((item) => <article key={item.id}><span>{item.title.split(" ").map((word) => word[0]).slice(0, 2).join("")}</span><div><strong>{item.title}</strong><small>{item.phone || "-"} · {item.address || "-"}</small></div><button onClick={() => remove(item)} aria-label="Hapus jamaah"><Trash2 /></button></article>)}{!items.length && <p className="empty">Belum ada jamaah.</p>}</div></Panel></div>;
 }
 
 function EntryForm({ kind, close, save }: { kind: Kind; close: () => void; save: (data: SaveRecord) => Promise<void> }) {
