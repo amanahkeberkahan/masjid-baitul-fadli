@@ -10,15 +10,15 @@ import {
 } from "firebase/firestore";
 import {
   ArrowDownLeft, ArrowUpRight, CalendarDays, CheckCircle2, ChevronRight,
-  HeartHandshake, Home, Landmark, LogOut, Plus, Settings,
-  ShieldCheck, Trash2, Users, Wallet, X,
+  Clock3, HeartHandshake, Home, Landmark, LayoutGrid, LogOut, MapPin,
+  Moon, Plus, RefreshCw, Settings, ShieldCheck, Sun, Trash2, Users, Wallet, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { auth, db } from "@/lib/firebase";
 import historicalTransactions from "@/data/finance-history.json";
 
-type View = "beranda" | "keuangan" | "program" | "kegiatan" | "jamaah" | "pengaturan";
+type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "pengaturan" | "menu";
 type Kind = "transaction" | "program" | "event" | "member";
 type DataRecord = {
   id: string; kind: Kind; title: string; date: string; amount: number; type: string;
@@ -31,6 +31,7 @@ const paths: Record<Kind, string> = {
 };
 const publicNav = [
   ["beranda", "Beranda", Home],
+  ["shalat", "Jadwal Shalat", Clock3],
   ["program", "Program Donasi", HeartHandshake],
   ["kegiatan", "Kegiatan", CalendarDays],
 ] as const;
@@ -139,31 +140,36 @@ export default function Page() {
   }
 
   const nav = admin ? [...publicNav, ...privateNav] : publicNav;
-  const title = view === "pengaturan" ? "Pengaturan" : nav.find(([id]) => id === view)?.[1] ?? "Beranda";
+  const mobileNav = admin ? [
+    ["beranda", "Beranda", Home],
+    ["shalat", "Shalat", Clock3],
+    ["keuangan", "Keuangan", Wallet],
+    ["program", "Donasi", HeartHandshake],
+    ["menu", "Menu", LayoutGrid],
+  ] as const : publicNav;
   return <div className="shell">
     <aside className="sidebar">
-      <button className="brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-white.png" alt="Masjid Baitul Fadli" width={1536} height={1024} priority /></button>
+      <button className="brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button>
       <p className="caption">MENU UTAMA</p>
       <nav>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon />{label}</button>)}</nav>
       <div className="sidebar-foot">{admin && <button className={view === "pengaturan" ? "active" : ""} onClick={() => setView("pengaturan")}><Settings />Pengaturan</button>}<section><ShieldCheck /><strong>{admin ? "Mode pengurus aktif" : "Data masjid aman"}</strong><small>{admin ? "Anda dapat mengelola data masjid." : "Informasi publik dapat dibuka tanpa akun."}</small></section></div>
     </aside>
     <main>
-      <header>
-        <div className="heading"><button className="mobile-brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-white.png" alt="Masjid Baitul Fadli" width={1536} height={1024} priority /></button><div><small>Masjid Baitul Fadli</small><h1>{title}</h1></div></div>
-        <div className="tools">{admin && <><Button className="account-button" variant="outline" onClick={() => setView("pengaturan")}><Settings /><span>Akun</span></Button><span className="avatar">{user?.email?.slice(0, 2).toUpperCase() ?? "PG"}</span></>}</div>
-      </header>
+      <header className="clean-header"><button className="mobile-brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button></header>
       <div className="page">
         {error && <p className="data-alert">{error}</p>}
         {view === "beranda" ? <Dashboard records={records} admin={admin} go={setView} donate={() => setDonateOpen(true)} />
+          : view === "shalat" ? <PrayerPage />
           : view === "keuangan" && admin ? <Finance records={records} add={() => setForm("transaction")} remove={remove} />
           : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} remove={remove} />
           : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} />
+          : view === "menu" && admin && user ? <AdminMenu go={setView} logout={logout} />
           : <Dashboard records={records} admin={admin} go={setView} donate={() => setDonateOpen(true)} />}
       </div>
     </main>
-    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${nav.length}, minmax(0, 1fr))` }}>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Donasi" : label.replace("Data ", "")}</span></button>)}</nav>
+    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Donasi" : label.replace("Data ", "")}</span></button>)}</nav>
     {form && <EntryForm kind={form} close={() => setForm(null)} save={save} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
     {donateOpen && <DonationModal close={() => setDonateOpen(false)} />}
@@ -179,7 +185,8 @@ function Dashboard({ records, admin, go, donate }: { records: DataRecord[]; admi
   const expense = transactions.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
   const raised = programs.reduce((sum, item) => sum + item.amount, 0);
   return <>
-    <section className="welcome"><div><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan dan program Masjid Baitul Fadli.</p></div><Button onClick={donate}><HeartHandshake />Donasi Sekarang</Button></section>
+    <PrayerHero onOpen={() => go("shalat")} />
+    <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><Button onClick={donate}><HeartHandshake />Donasi Sekarang</Button></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="(max-width: 800px) 42vw, 360px" priority /></div></section>
     <div className="stats">{admin ? <>
       <Stat label="Saldo Kas" value={money(income - expense)} note="Berdasarkan transaksi" icon={<Wallet />} color="green" />
       <Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="blue" />
@@ -198,6 +205,106 @@ function Dashboard({ records, admin, go, donate }: { records: DataRecord[]; admi
       <section className="quote"><b>“</b><p>Perumpamaan orang yang menginfakkan hartanya di jalan Allah seperti sebutir biji yang menumbuhkan tujuh tangkai.</p><small>QS. Al-Baqarah: 261</small></section>
     </div>
   </>;
+}
+
+type PrayerKey = "Fajr" | "Sunrise" | "Dhuhr" | "Asr" | "Maghrib" | "Isha";
+type PrayerSchedule = Record<PrayerKey, string>;
+const prayerItems: Array<{ key: PrayerKey; label: string; icon: typeof Clock3 }> = [
+  { key: "Fajr", label: "Subuh", icon: Moon },
+  { key: "Sunrise", label: "Terbit", icon: Sun },
+  { key: "Dhuhr", label: "Dzuhur", icon: Sun },
+  { key: "Asr", label: "Ashar", icon: Clock3 },
+  { key: "Maghrib", label: "Maghrib", icon: Moon },
+  { key: "Isha", label: "Isya", icon: Moon },
+];
+const jakartaClock = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+});
+async function fetchPrayerSchedule() {
+  const response = await fetch("/api/prayer-times", { cache: "no-store" });
+  if (!response.ok) throw new Error("Jadwal tidak tersedia");
+  return response.json() as Promise<{ timings: PrayerSchedule; dateLabel: string }>;
+}
+
+function usePrayerTimes() {
+  const [schedule, setSchedule] = useState<PrayerSchedule | null>(null);
+  const [dateLabel, setDateLabel] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  async function load() {
+    setLoading(true); setFailed(false);
+    try {
+      const result = await fetchPrayerSchedule();
+      setSchedule(result.timings); setDateLabel(result.dateLabel);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    fetchPrayerSchedule().then((result) => {
+      if (!active) return;
+      setSchedule(result.timings); setDateLabel(result.dateLabel); setLoading(false);
+    }).catch(() => {
+      if (!active) return;
+      setFailed(true); setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+
+  const current = jakartaClock.format(new Date(now)).split(":").map(Number);
+  const nowSeconds = current[0] * 3600 + current[1] * 60 + current[2];
+  const prayerOnly = prayerItems.filter((item) => item.key !== "Sunrise");
+  const next = schedule ? prayerOnly.find((item) => timeToSeconds(schedule[item.key]) > nowSeconds) ?? prayerOnly[0] : null;
+  const target = next && schedule ? timeToSeconds(schedule[next.key]) + (next.key === "Fajr" && timeToSeconds(schedule.Fajr) <= nowSeconds ? 86400 : 0) : 0;
+  const countdown = target ? formatCountdown(target - nowSeconds) : "--:--:--";
+  return { schedule, dateLabel, loading, failed, next, countdown, reload: load };
+}
+
+function timeToSeconds(value: string) {
+  const [hour, minute] = value.slice(0, 5).split(":").map(Number);
+  return hour * 3600 + minute * 60;
+}
+function formatCountdown(value: number) {
+  const safe = Math.max(0, value);
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const seconds = safe % 60;
+  return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
+}
+
+function PrayerHero({ onOpen }: { onOpen: () => void }) {
+  const { schedule, next, countdown, loading, failed } = usePrayerTimes();
+  return <section className="prayer-hero">
+    <div className="roof-shape" aria-hidden="true"><i /><i /><i /></div>
+    <div className="prayer-copy"><span className="location-pill"><MapPin />Gunung Anyar, Surabaya</span><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong><small>Metode Kementerian Agama RI · WIB</small></div>
+    <button className="prayer-link" onClick={onOpen}>Lihat jadwal lengkap <ChevronRight /></button>
+  </section>;
+}
+
+function PrayerPage() {
+  const { schedule, dateLabel, loading, failed, next, countdown, reload } = usePrayerTimes();
+  return <div className="stack prayer-page">
+    <Intro eyebrow="WAKTU IBADAH" title="Jadwal Shalat Hari Ini" description="Jadwal untuk Gunung Anyar, Kota Surabaya, menggunakan metode Kementerian Agama Republik Indonesia." />
+    <section className="prayer-focus"><div className="minaret-art" aria-hidden="true"><span /><i /></div><div><span>MENUJU WAKTU SALAT</span><h2>{next && schedule ? `${next.label} · ${schedule[next.key].slice(0, 5)}` : "Memuat jadwal"}</h2><strong>{countdown}</strong><small>{dateLabel || "Waktu Indonesia Barat"}</small></div></section>
+    {failed ? <section className="prayer-error"><Clock3 /><h3>Jadwal belum dapat dimuat</h3><p>Periksa koneksi internet lalu coba kembali.</p><Button variant="outline" onClick={() => void reload()}><RefreshCw />Muat ulang</Button></section> : <div className="prayer-list">{prayerItems.map(({ key, label, icon: Icon }) => <article className={next?.key === key ? "next" : ""} key={key}><span><Icon /></span><div><small>{key === "Sunrise" ? "Matahari terbit" : "Waktu salat"}</small><strong>{label}</strong></div><b>{loading ? "--:--" : schedule?.[key]?.slice(0, 5) ?? "--:--"}</b>{next?.key === key && <em>Berikutnya</em>}</article>)}</div>}
+    <p className="prayer-note">Jadwal bersifat panduan. Untuk iqamah dan perubahan kegiatan, ikuti pengumuman resmi takmir Masjid Baitul Fadli.</p>
+  </div>;
+}
+
+function AdminMenu({ go, logout }: { go: (view: View) => void; logout: () => Promise<void> }) {
+  const items = [
+    ["kegiatan", "Kelola Kegiatan", "Publikasikan agenda masjid", CalendarDays],
+    ["jamaah", "Data Jamaah", "Data privat khusus pengurus", Users],
+    ["pengaturan", "Pengaturan", "Akun, Firestore, dan impor data", Settings],
+  ] as const;
+  return <div className="stack"><Intro eyebrow="MENU PENGURUS" title="Kelola Masjid" description="Fitur administrasi hanya tampil setelah akun pengurus terverifikasi." /><div className="admin-menu">{items.map(([id, title, note, Icon]) => <button key={id} onClick={() => go(id)}><span><Icon /></span><div><strong>{title}</strong><small>{note}</small></div><ChevronRight /></button>)}<button className="logout-menu" onClick={() => void logout()}><span><LogOut /></span><div><strong>Keluar</strong><small>Tutup akses pengurus di perangkat ini</small></div><ChevronRight /></button></div></div>;
 }
 
 function SettingsPage({ user, logout }: { user: User; logout: () => Promise<void> }) {

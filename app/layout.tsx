@@ -1,5 +1,12 @@
 import type { Metadata } from "next";
+import localFont from "next/font/local";
 import "./globals.css";
+
+const geist = localFont({
+  src: "./fonts/Geist.woff2",
+  variable: "--font-geist",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Masjid Baitul Fadli | Pusat Layanan Jamaah",
@@ -16,7 +23,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="id">
+    <html lang="id" className={geist.variable}>
       <body className="antialiased">{children}</body>
     </html>
   );
