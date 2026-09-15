@@ -27,6 +27,7 @@ type DataRecord = {
 type SaveRecord = Omit<DataRecord, "id">;
 type FinanceSummary = {
   income: number; expense: number; balance: number; transactionCount: number;
+  openingBalance: number; periodIncome: number; periodExpense: number; period: string;
   updatedThrough: string; live: boolean;
 };
 
@@ -36,7 +37,7 @@ const paths: Record<Kind, string> = {
 const publicNav = [
   ["beranda", "Beranda", Home],
   ["shalat", "Jadwal Shalat", Clock3],
-  ["program", "Program Donasi", HeartHandshake],
+  ["program", "Kebaikan", HeartHandshake],
   ["kegiatan", "Kegiatan", CalendarDays],
 ] as const;
 const privateNav = [
@@ -46,30 +47,48 @@ const privateNav = [
 const money = (value: number) => new Intl.NumberFormat("id-ID", {
   style: "currency", currency: "IDR", maximumFractionDigits: 0,
 }).format(value);
-const historicalFinance = historicalTransactions.reduce<FinanceSummary>((summary, item) => {
-  if (item.type === "Pemasukan") summary.income += item.amount;
-  if (item.type === "Pengeluaran") summary.expense += item.amount;
-  summary.balance = summary.income - summary.expense;
-  summary.transactionCount += 1;
-  if (item.date > summary.updatedThrough) summary.updatedThrough = item.date;
-  return summary;
-}, { income: 0, expense: 0, balance: 0, transactionCount: 0, updatedThrough: "", live: false });
+function currentJakartaPeriod() {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}`;
+}
 
-function summarizeTransactions(items: DataRecord[], live = true): FinanceSummary {
-  const summary = items.reduce((result, item) => {
-    if (item.type === "Pemasukan") result.income += item.amount;
-    if (item.type === "Pengeluaran") result.expense += item.amount;
-    result.transactionCount += 1;
-    if (item.date > result.updatedThrough) result.updatedThrough = item.date;
-    return result;
-  }, { income: 0, expense: 0, balance: 0, transactionCount: 0, updatedThrough: "", live });
-  summary.balance = summary.income - summary.expense;
+function summarizeTransactions(items: Array<{ type: string; amount: number; date: string }>, live = true): FinanceSummary {
+  const period = currentJakartaPeriod();
+  const summary: FinanceSummary = {
+    income: 0, expense: 0, balance: 0, transactionCount: 0,
+    openingBalance: 0, periodIncome: 0, periodExpense: 0, period,
+    updatedThrough: "", live,
+  };
+  for (const item of items) {
+    const incoming = item.type === "Pemasukan";
+    if (incoming) summary.income += item.amount;
+    if (item.type === "Pengeluaran") summary.expense += item.amount;
+    summary.transactionCount += 1;
+    if (item.date > summary.updatedThrough) summary.updatedThrough = item.date;
+    if (item.date.slice(0, 7) < period) summary.openingBalance += incoming ? item.amount : -item.amount;
+    if (item.date.slice(0, 7) === period && incoming) summary.periodIncome += item.amount;
+    if (item.date.slice(0, 7) === period && item.type === "Pengeluaran") summary.periodExpense += item.amount;
+  }
+  summary.balance = summary.openingBalance + summary.periodIncome - summary.periodExpense;
   return summary;
 }
+const historicalFinance = summarizeTransactions(historicalTransactions, false);
 
 function dateId(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || "data terakhir";
   return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T12:00:00+07:00`));
+}
+function monthId(period: string) {
+  if (!/^\d{4}-\d{2}$/.test(period)) return "bulan ini";
+  return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date(`${period}-01T12:00:00+07:00`));
+}
+function previousMonthId(period: string) {
+  if (!/^\d{4}-\d{2}$/.test(period)) return "Bulan Lalu";
+  const [year, month] = period.split("-").map(Number);
+  return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date(Date.UTC(year, month - 2, 1)));
 }
 
 function mapRecord(kind: Kind, item: QueryDocumentSnapshot<DocumentData>): DataRecord {
@@ -125,6 +144,8 @@ export default function Page() {
           setFinanceSummary(summary);
           void setDoc(doc(db, "publicStats", "finance"), {
             income: summary.income, expense: summary.expense, balance: summary.balance,
+            openingBalance: summary.openingBalance, periodIncome: summary.periodIncome,
+            periodExpense: summary.periodExpense, period: summary.period,
             transactionCount: summary.transactionCount, updatedThrough: summary.updatedThrough,
             updatedAt: serverTimestamp(),
           }, { merge: true }).catch(() => undefined);
@@ -148,6 +169,10 @@ export default function Page() {
     if (!Number.isFinite(balance)) return;
     setFinanceSummary({
       income: Number(data.income ?? 0), expense: Number(data.expense ?? 0), balance,
+      openingBalance: Number(data.openingBalance ?? historicalFinance.openingBalance),
+      periodIncome: Number(data.periodIncome ?? historicalFinance.periodIncome),
+      periodExpense: Number(data.periodExpense ?? historicalFinance.periodExpense),
+      period: String(data.period ?? historicalFinance.period),
       transactionCount: Number(data.transactionCount ?? 0),
       updatedThrough: String(data.updatedThrough ?? ""), live: true,
     });
@@ -220,7 +245,7 @@ export default function Page() {
           : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} />}
       </div>
     </main>
-    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Donasi" : label.replace("Data ", "")}</span></button>)}</nav>
+    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
     {form && <EntryForm kind={form} close={() => setForm(null)} save={save} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
     {donateOpen && <DonationModal close={() => setDonateOpen(false)} />}
@@ -234,20 +259,19 @@ function Dashboard({ records, finance, admin, go, donate }: { records: DataRecor
   const members = records.filter((item) => item.kind === "member");
   const income = transactions.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
   const expense = transactions.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
-  const raised = programs.reduce((sum, item) => sum + item.amount, 0);
   return <>
     <PrayerHero onOpen={() => go("shalat")} />
-    <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><Button onClick={donate}><HeartHandshake />Donasi Sekarang</Button></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="100vw" priority /></div></section>
+    <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><Button onClick={donate}><HeartHandshake />Dukung Masjid</Button></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="100vw" priority /></div></section>
     <div className={admin ? "stats" : "stats public-stats"}>{admin ? <>
       <Stat label="Saldo Kas" value={money(finance.balance)} note={`Diperbarui ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="green" />
       <Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="blue" />
       <Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" />
       <Stat label="Jamaah Terdaftar" value={String(members.length)} note="Data pengurus" icon={<Users />} color="navy" />
     </> : <>
-      <Stat label="Saldo Masjid" value={money(finance.balance)} note={`Per ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="navy" />
-      <Stat label="Program Berjalan" value={String(programs.length)} note="Program kebaikan" icon={<HeartHandshake />} color="green" />
-      <Stat label="Dana Program" value={money(raised)} note="Dana terkumpul" icon={<HeartHandshake />} color="blue" />
-      <Stat label="Agenda" value={String(events.length)} note="Kegiatan terdaftar" icon={<CalendarDays />} color="gold" />
+      <Stat label={`Saldo ${previousMonthId(finance.period)}`} value={money(finance.openingBalance)} note="Saldo awal bulan" icon={<Wallet />} color="navy" />
+      <Stat label={`Uang Masuk ${monthId(finance.period)}`} value={money(finance.periodIncome)} note="Penerimaan bulan berjalan" icon={<ArrowDownLeft />} color="green" />
+      <Stat label={`Uang Keluar ${monthId(finance.period)}`} value={money(finance.periodExpense)} note="Pengeluaran bulan berjalan" icon={<ArrowUpRight />} color="gold" />
+      <Stat label={`Saldo ${monthId(finance.period)}`} value={money(finance.balance)} note={`Diperbarui ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="blue" />
     </>}</div>
     <div className="dashboard-grid">
       {admin && <Panel title="Transaksi Terbaru" action="Lihat laporan" onAction={() => go("keuangan")}><TransactionList records={transactions.slice(0, 4)} /></Panel>}
@@ -381,7 +405,9 @@ function SettingsPage({ user, logout }: { user: User; logout: () => Promise<void
       try {
         await setDoc(doc(db, "publicStats", "finance"), {
           income: historicalFinance.income, expense: historicalFinance.expense,
-          balance: historicalFinance.balance, transactionCount: historicalFinance.transactionCount,
+          balance: historicalFinance.balance, openingBalance: historicalFinance.openingBalance,
+          periodIncome: historicalFinance.periodIncome, periodExpense: historicalFinance.periodExpense,
+          period: historicalFinance.period, transactionCount: historicalFinance.transactionCount,
           updatedThrough: historicalFinance.updatedThrough, updatedAt: serverTimestamp(),
         }, { merge: true });
         setImportResult("Berhasil: 779 transaksi dan ringkasan saldo publik telah diperbarui. Saldo per 11 September 2026 adalah Rp1.230.000.");
@@ -436,7 +462,7 @@ function Finance({ records, add, remove }: { records: DataRecord[]; add: () => v
 }
 function Programs({ records, admin, add, donate, remove }: { records: DataRecord[]; admin: boolean; add: () => void; donate: () => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "program");
-  return <div className="stack"><Intro eyebrow="PROGRAM KEBAIKAN" title="Tumbuhkan Manfaat Bersama" description="Setiap rupiah dikelola untuk kebutuhan jamaah dan kemakmuran masjid."><div className="actions">{admin && <Button variant="outline" onClick={add}><Plus />Tambah Program</Button>}<Button className="gold-btn" onClick={donate}><HeartHandshake />Donasi Sekarang</Button></div></Intro><div className="program-cards">{items.map((item, index) => { const pct = item.target ? Math.min(100, Math.round(item.amount / item.target * 100)) : 0; return <article key={item.id}><div className={"program-top " + ["emerald", "amber", "blue"][index % 3]}><span><Landmark /></span><b>{item.category || "Program"}</b></div><div className="program-body"><h3>{item.title}</h3><p>{item.details || "Program kebaikan Masjid Baitul Fadli."}</p><div className="program-line"><strong>{money(item.amount)}</strong><span>{pct}%</span></div><Progress value={pct} /><small>Target {money(item.target)}</small><div className="card-actions"><Button variant="outline" onClick={donate}>Donasi<ChevronRight /></Button>{admin && <Button variant="outline" onClick={() => remove(item)} aria-label="Hapus program"><Trash2 /></Button>}</div></div></article>; })}{!items.length && <p className="empty">Belum ada program yang dipublikasikan.</p>}</div></div>;
+  return <div className="stack"><Intro eyebrow="PROGRAM KEBAIKAN" title="Tumbuhkan Manfaat Bersama" description="Setiap rupiah dikelola untuk kebutuhan jamaah dan kemakmuran masjid."><div className="actions">{admin && <Button variant="outline" onClick={add}><Plus />Tambah Program</Button>}<Button className="gold-btn" onClick={donate}><HeartHandshake />Dukung Masjid</Button></div></Intro><div className="program-cards">{items.map((item, index) => { const pct = item.target ? Math.min(100, Math.round(item.amount / item.target * 100)) : 0; return <article key={item.id}><div className={"program-top " + ["emerald", "amber", "blue"][index % 3]}><span><Landmark /></span><b>{item.category || "Program"}</b></div><div className="program-body"><h3>{item.title}</h3><p>{item.details || "Program kebaikan Masjid Baitul Fadli."}</p><div className="program-line"><strong>{money(item.amount)}</strong><span>{pct}%</span></div><Progress value={pct} /><small>Target {money(item.target)}</small><div className="card-actions"><Button variant="outline" onClick={donate}>Dukung<ChevronRight /></Button>{admin && <Button variant="outline" onClick={() => remove(item)} aria-label="Hapus program"><Trash2 /></Button>}</div></div></article>; })}{!items.length && <p className="empty">Belum ada program yang dipublikasikan.</p>}</div></div>;
 }
 function Events({ records, admin, add, remove }: { records: DataRecord[]; admin: boolean; add: () => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "event");

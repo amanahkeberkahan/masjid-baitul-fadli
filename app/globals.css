@@ -41,7 +41,7 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
 @media(max-width:430px){.modern-welcome{grid-template-columns:minmax(0,1.45fr) 105px!important}.welcome-copy{padding:21px 16px}.modern-welcome h2{font-size:20px}.modern-welcome .welcome-copy>p:not(.eyebrow){margin-bottom:16px}.mosque-photo img{object-position:53% 50%}.clean-header .mobile-brand{width:148px}.prayer-copy h2{font-size:25px}.countdown{font-size:18px}.bottom-nav button{font-size:9px}.bottom-nav button svg{width:19px}.stats,.stats.three{gap:11px}.stat{padding:16px}.prayer-focus{grid-template-columns:98px 1fr}.minaret-art span{left:18px}.minaret-art i{left:8px}}
 
 /* Ringkasan keuangan publik dan koreksi komposisi foto pada layar HP */
-.public-stats{grid-template-columns:1.35fr 1fr 1fr}.public-stats .stat:first-child{border-color:#cfe6f0;box-shadow:0 12px 34px #123d6a12}.public-stats .stat:first-child strong{color:#123d6a}
+.public-stats{grid-template-columns:repeat(4,minmax(0,1fr))}.public-stats .stat:first-child{border-color:#cfe6f0;box-shadow:0 12px 34px #123d6a12}.public-stats .stat:first-child strong{color:#123d6a}
 @media(max-width:800px){
   .modern-welcome{display:flex!important;flex-direction:column!important;min-height:0!important}
   .modern-welcome::after{display:none}
@@ -50,6 +50,9 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
   .modern-welcome .mosque-photo img{object-fit:cover;object-position:center 55%}
   .modern-welcome .welcome-copy{position:relative;z-index:2;margin-top:-16px;padding:22px 19px 24px;background:#fff;border-radius:22px 22px 0 0}
   .public-stats{grid-template-columns:1fr 1fr!important}
-  .public-stats .stat:first-child{grid-column:1/-1;border-left:4px solid #169dcc}
+  .public-stats .stat{padding:14px}
+  .public-stats .stat:first-child{grid-column:auto;border-left:0}
+  .public-stats .stat>strong{font-size:17px}
+  .public-stats .stat>small{font-size:11px}
 }
-@media(max-width:390px){.modern-welcome .mosque-photo{height:132px;min-height:132px}.public-stats{grid-template-columns:1fr!important}.public-stats .stat:first-child{grid-column:auto}}
+@media(max-width:390px){.modern-welcome .mosque-photo{height:132px;min-height:132px}.public-stats{grid-template-columns:1fr 1fr!important}}
