@@ -6,7 +6,7 @@ import type { User } from "firebase/auth";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import {
   addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query,
-  serverTimestamp, writeBatch, type DocumentData, type QueryDocumentSnapshot, type Unsubscribe,
+  serverTimestamp, setDoc, writeBatch, type DocumentData, type QueryDocumentSnapshot, type Unsubscribe,
 } from "firebase/firestore";
 import {
   ArrowDownLeft, ArrowUpRight, CalendarDays, CheckCircle2, ChevronRight,
@@ -25,6 +25,10 @@ type DataRecord = {
   category: string; details: string; target: number; phone: string; address: string;
 };
 type SaveRecord = Omit<DataRecord, "id">;
+type FinanceSummary = {
+  income: number; expense: number; balance: number; transactionCount: number;
+  updatedThrough: string; live: boolean;
+};
 
 const paths: Record<Kind, string> = {
   transaction: "transactions", program: "programs", event: "events", member: "members",
@@ -42,6 +46,31 @@ const privateNav = [
 const money = (value: number) => new Intl.NumberFormat("id-ID", {
   style: "currency", currency: "IDR", maximumFractionDigits: 0,
 }).format(value);
+const historicalFinance = historicalTransactions.reduce<FinanceSummary>((summary, item) => {
+  if (item.type === "Pemasukan") summary.income += item.amount;
+  if (item.type === "Pengeluaran") summary.expense += item.amount;
+  summary.balance = summary.income - summary.expense;
+  summary.transactionCount += 1;
+  if (item.date > summary.updatedThrough) summary.updatedThrough = item.date;
+  return summary;
+}, { income: 0, expense: 0, balance: 0, transactionCount: 0, updatedThrough: "", live: false });
+
+function summarizeTransactions(items: DataRecord[], live = true): FinanceSummary {
+  const summary = items.reduce((result, item) => {
+    if (item.type === "Pemasukan") result.income += item.amount;
+    if (item.type === "Pengeluaran") result.expense += item.amount;
+    result.transactionCount += 1;
+    if (item.date > result.updatedThrough) result.updatedThrough = item.date;
+    return result;
+  }, { income: 0, expense: 0, balance: 0, transactionCount: 0, updatedThrough: "", live });
+  summary.balance = summary.income - summary.expense;
+  return summary;
+}
+
+function dateId(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || "data terakhir";
+  return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T12:00:00+07:00`));
+}
 
 function mapRecord(kind: Kind, item: QueryDocumentSnapshot<DocumentData>): DataRecord {
   const data = item.data();
@@ -63,6 +92,7 @@ export default function Page() {
   const [user, setUser] = useState<User | null>(null);
   const [admin, setAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
+  const [financeSummary, setFinanceSummary] = useState<FinanceSummary>(historicalFinance);
   const [error, setError] = useState("");
   const lastLogoTap = useRef(0);
 
@@ -90,6 +120,15 @@ export default function Page() {
       unsubscribers.push(onSnapshot(source, (snapshot) => {
         const next = snapshot.docs.map((item) => mapRecord(kind, item));
         setRecords((current) => [...current.filter((item) => item.kind !== kind), ...next]);
+        if (kind === "transaction") {
+          const summary = summarizeTransactions(next);
+          setFinanceSummary(summary);
+          void setDoc(doc(db, "publicStats", "finance"), {
+            income: summary.income, expense: summary.expense, balance: summary.balance,
+            transactionCount: summary.transactionCount, updatedThrough: summary.updatedThrough,
+            updatedAt: serverTimestamp(),
+          }, { merge: true }).catch(() => undefined);
+        }
         setError("");
       }, () => setError("Sebagian data belum dapat dimuat. Silakan muat ulang halaman.")));
     };
@@ -101,6 +140,18 @@ export default function Page() {
     }
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [admin]);
+
+  useEffect(() => onSnapshot(doc(db, "publicStats", "finance"), (snapshot) => {
+    if (!snapshot.exists()) return;
+    const data = snapshot.data();
+    const balance = Number(data.balance);
+    if (!Number.isFinite(balance)) return;
+    setFinanceSummary({
+      income: Number(data.income ?? 0), expense: Number(data.expense ?? 0), balance,
+      transactionCount: Number(data.transactionCount ?? 0),
+      updatedThrough: String(data.updatedThrough ?? ""), live: true,
+    });
+  }, () => undefined), []);
 
   async function login(email: string, password: string) {
     const credential = await signInWithEmailAndPassword(auth, email, password);
@@ -158,7 +209,7 @@ export default function Page() {
       <header className="clean-header"><button className="mobile-brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button></header>
       <div className="page">
         {error && <p className="data-alert">{error}</p>}
-        {view === "beranda" ? <Dashboard records={records} admin={admin} go={setView} donate={() => setDonateOpen(true)} />
+        {view === "beranda" ? <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} />
           : view === "shalat" ? <PrayerPage />
           : view === "keuangan" && admin ? <Finance records={records} add={() => setForm("transaction")} remove={remove} />
           : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
@@ -166,7 +217,7 @@ export default function Page() {
           : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} />
           : view === "menu" && admin && user ? <AdminMenu go={setView} logout={logout} />
-          : <Dashboard records={records} admin={admin} go={setView} donate={() => setDonateOpen(true)} />}
+          : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} />}
       </div>
     </main>
     <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Donasi" : label.replace("Data ", "")}</span></button>)}</nav>
@@ -176,7 +227,7 @@ export default function Page() {
   </div>;
 }
 
-function Dashboard({ records, admin, go, donate }: { records: DataRecord[]; admin: boolean; go: (view: View) => void; donate: () => void }) {
+function Dashboard({ records, finance, admin, go, donate }: { records: DataRecord[]; finance: FinanceSummary; admin: boolean; go: (view: View) => void; donate: () => void }) {
   const transactions = records.filter((item) => item.kind === "transaction");
   const programs = records.filter((item) => item.kind === "program");
   const events = records.filter((item) => item.kind === "event");
@@ -186,17 +237,17 @@ function Dashboard({ records, admin, go, donate }: { records: DataRecord[]; admi
   const raised = programs.reduce((sum, item) => sum + item.amount, 0);
   return <>
     <PrayerHero onOpen={() => go("shalat")} />
-    <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><Button onClick={donate}><HeartHandshake />Donasi Sekarang</Button></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="(max-width: 800px) 42vw, 360px" priority /></div></section>
-    <div className="stats">{admin ? <>
-      <Stat label="Saldo Kas" value={money(income - expense)} note="Berdasarkan transaksi" icon={<Wallet />} color="green" />
+    <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><Button onClick={donate}><HeartHandshake />Donasi Sekarang</Button></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="100vw" priority /></div></section>
+    <div className={admin ? "stats" : "stats public-stats"}>{admin ? <>
+      <Stat label="Saldo Kas" value={money(finance.balance)} note={`Diperbarui ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="green" />
       <Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="blue" />
       <Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" />
       <Stat label="Jamaah Terdaftar" value={String(members.length)} note="Data pengurus" icon={<Users />} color="navy" />
     </> : <>
+      <Stat label="Saldo Masjid" value={money(finance.balance)} note={`Per ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="navy" />
       <Stat label="Program Berjalan" value={String(programs.length)} note="Program kebaikan" icon={<HeartHandshake />} color="green" />
-      <Stat label="Dana Program" value={money(raised)} note="Dana terkumpul" icon={<Wallet />} color="blue" />
+      <Stat label="Dana Program" value={money(raised)} note="Dana terkumpul" icon={<HeartHandshake />} color="blue" />
       <Stat label="Agenda" value={String(events.length)} note="Kegiatan terdaftar" icon={<CalendarDays />} color="gold" />
-      <Stat label="Akses" value="Jamaah" note="Informasi publik" icon={<Users />} color="navy" />
     </>}</div>
     <div className="dashboard-grid">
       {admin && <Panel title="Transaksi Terbaru" action="Lihat laporan" onAction={() => go("keuangan")}><TransactionList records={transactions.slice(0, 4)} /></Panel>}
@@ -327,7 +378,16 @@ function SettingsPage({ user, logout }: { user: User; logout: () => Promise<void
         });
         await batch.commit();
       }
-      setImportResult("Berhasil: 779 transaksi terhubung. Saldo per 11 September 2026 adalah Rp1.230.000.");
+      try {
+        await setDoc(doc(db, "publicStats", "finance"), {
+          income: historicalFinance.income, expense: historicalFinance.expense,
+          balance: historicalFinance.balance, transactionCount: historicalFinance.transactionCount,
+          updatedThrough: historicalFinance.updatedThrough, updatedAt: serverTimestamp(),
+        }, { merge: true });
+        setImportResult("Berhasil: 779 transaksi dan ringkasan saldo publik telah diperbarui. Saldo per 11 September 2026 adalah Rp1.230.000.");
+      } catch {
+        setImportResult("Transaksi berhasil diimpor dan saldo aplikasi sudah Rp1.230.000. Agar pembaruan berikutnya tampil untuk jamaah secara langsung, tambahkan izin publicStats pada Rules Firestore.");
+      }
     } catch {
       setImportResult("Impor belum berhasil. Pastikan akun masih aktif dan Rules Firestore mengizinkan pengurus menulis transaksi.");
     } finally {
