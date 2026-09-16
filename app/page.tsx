@@ -381,7 +381,6 @@ function formatCountdown(value: number) {
 function PrayerHero({ onOpen }: { onOpen: () => void }) {
   const { schedule, next, countdown, loading, failed, location, useGps, locating } = usePrayerTimes();
   return <section className="prayer-hero">
-    <div className="roof-shape" aria-hidden="true"><i /><i /><i /></div>
     <div className="prayer-copy"><button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating} title="Gunakan lokasi GPS saya"><MapPin />{locating ? "Mencari lokasi..." : location}</button><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong><small>Metode Kementerian Agama RI · WIB</small></div>
     <button className="prayer-link" onClick={onOpen}>Lihat jadwal lengkap <ChevronRight /></button>
   </section>;
@@ -396,7 +395,7 @@ function PrayerPage() {
       <Button variant="outline" disabled={locating} onClick={useGps}><LocateFixed />{locating ? "Mencari..." : "Gunakan Lokasi GPS Saya"}</Button>
     </div>
     {gpsError && <p className="data-alert">{gpsError}</p>}
-    <section className="prayer-focus"><div className="minaret-art" aria-hidden="true"><span /><i /></div><div><span>MENUJU WAKTU SALAT</span><h2>{next && schedule ? `${next.label} · ${schedule[next.key].slice(0, 5)}` : "Memuat jadwal"}</h2><strong>{countdown}</strong><small>{dateLabel || "Waktu Indonesia Barat"}</small></div></section>
+    <section className="prayer-focus"><div><span>MENUJU WAKTU SALAT</span><h2>{next && schedule ? `${next.label} · ${schedule[next.key].slice(0, 5)}` : "Memuat jadwal"}</h2><strong>{countdown}</strong><small>{dateLabel || "Waktu Indonesia Barat"}</small></div></section>
     {failed ? <section className="prayer-error"><Clock3 /><h3>Jadwal belum dapat dimuat</h3><p>Periksa koneksi internet lalu coba kembali.</p><Button variant="outline" onClick={() => void reload()}><RefreshCw />Muat ulang</Button></section> : <div className="prayer-list">{prayerItems.map(({ key, label, icon: Icon }) => <article className={next?.key === key ? "next" : ""} key={key}><span><Icon /></span><div><small>{key === "Sunrise" ? "Matahari terbit" : "Waktu salat"}</small><strong>{label}</strong></div><b>{loading ? "--:--" : schedule?.[key]?.slice(0, 5) ?? "--:--"}</b>{next?.key === key && <em>Berikutnya</em>}</article>)}</div>}
     <p className="prayer-note">Jadwal bersifat panduan. Untuk iqamah dan perubahan kegiatan, ikuti pengumuman resmi takmir Masjid Baitul Fadli.</p>
   </div>;
