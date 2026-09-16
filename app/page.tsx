@@ -10,8 +10,8 @@ import {
 } from "firebase/firestore";
 import {
   ArrowDownLeft, ArrowUpRight, CalendarDays, CheckCircle2, ChevronRight,
-  Clock3, HeartHandshake, Home, Landmark, LayoutGrid, LogOut, MapPin,
-  Moon, Plus, RefreshCw, Settings, ShieldCheck, Sun, Trash2, Users, Wallet, X,
+  Clock3, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
+  Moon, Plus, QrCode, RefreshCw, Settings, ShieldCheck, Sun, Trash2, UserPlus, Users, Wallet, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -25,6 +25,7 @@ type DataRecord = {
   category: string; details: string; target: number; phone: string; address: string;
 };
 type SaveRecord = Omit<DataRecord, "id">;
+type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string };
 type FinanceSummary = {
   income: number; expense: number; balance: number; transactionCount: number;
   openingBalance: number; periodIncome: number; periodExpense: number; period: string;
@@ -108,6 +109,7 @@ export default function Page() {
   const [form, setForm] = useState<Kind | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const [donateOpen, setDonateOpen] = useState(false);
+  const [supporterOpen, setSupporterOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [admin, setAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
@@ -203,6 +205,11 @@ export default function Page() {
     if (!admin || !confirm("Hapus data ini?")) return;
     await deleteDoc(doc(db, paths[record.kind], record.id));
   }
+  async function registerSupporter(data: SupporterEntry) {
+    await addDoc(collection(db, "supporters"), {
+      ...data, status: "baru", createdAt: serverTimestamp(),
+    });
+  }
 
   function handleLogoTap() {
     if (admin || !authReady) return;
@@ -234,7 +241,7 @@ export default function Page() {
       <header className="clean-header"><button className="mobile-brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button></header>
       <div className="page">
         {error && <p className="data-alert">{error}</p>}
-        {view === "beranda" ? <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} />
+        {view === "beranda" ? <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} />
           : view === "shalat" ? <PrayerPage />
           : view === "keuangan" && admin ? <Finance records={records} add={() => setForm("transaction")} remove={remove} />
           : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
@@ -242,17 +249,18 @@ export default function Page() {
           : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} />
           : view === "menu" && admin && user ? <AdminMenu go={setView} logout={logout} />
-          : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} />}
+          : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} />}
       </div>
     </main>
     <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
     {form && <EntryForm kind={form} close={() => setForm(null)} save={save} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
     {donateOpen && <DonationModal close={() => setDonateOpen(false)} />}
+    {supporterOpen && <SupporterModal close={() => setSupporterOpen(false)} register={registerSupporter} />}
   </div>;
 }
 
-function Dashboard({ records, finance, admin, go, donate }: { records: DataRecord[]; finance: FinanceSummary; admin: boolean; go: (view: View) => void; donate: () => void }) {
+function Dashboard({ records, finance, admin, go, donate, joinSupporter }: { records: DataRecord[]; finance: FinanceSummary; admin: boolean; go: (view: View) => void; donate: () => void; joinSupporter: () => void }) {
   const transactions = records.filter((item) => item.kind === "transaction");
   const programs = records.filter((item) => item.kind === "program");
   const events = records.filter((item) => item.kind === "event");
@@ -261,7 +269,7 @@ function Dashboard({ records, finance, admin, go, donate }: { records: DataRecor
   const expense = transactions.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
   return <>
     <PrayerHero onOpen={() => go("shalat")} />
-    <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><Button onClick={donate}><HeartHandshake />Dukung Masjid</Button></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="100vw" priority /></div></section>
+    <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><div className="actions"><Button onClick={donate}><HeartHandshake />Dukung Masjid</Button><Button variant="outline" onClick={joinSupporter}><UserPlus />Jadi Donatur Tetap</Button></div></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="100vw" priority /></div></section>
     <div className={admin ? "stats" : "stats public-stats"}>{admin ? <>
       <Stat label="Saldo Kas" value={money(finance.balance)} note={`Diperbarui ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="green" />
       <Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="blue" />
@@ -295,24 +303,28 @@ const prayerItems: Array<{ key: PrayerKey; label: string; icon: typeof Clock3 }>
 const jakartaClock = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Jakarta", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
 });
-async function fetchPrayerSchedule() {
-  const response = await fetch("/api/prayer-times", { cache: "no-store" });
+async function fetchPrayerSchedule(coords?: { lat: number; lon: number }) {
+  const params = coords ? `?lat=${coords.lat}&lon=${coords.lon}` : "";
+  const response = await fetch(`/api/prayer-times${params}`, { cache: "no-store" });
   if (!response.ok) throw new Error("Jadwal tidak tersedia");
-  return response.json() as Promise<{ timings: PrayerSchedule; dateLabel: string }>;
+  return response.json() as Promise<{ timings: PrayerSchedule; dateLabel: string; location: string }>;
 }
 
 function usePrayerTimes() {
   const [schedule, setSchedule] = useState<PrayerSchedule | null>(null);
   const [dateLabel, setDateLabel] = useState("");
+  const [location, setLocation] = useState("Gunung Anyar, Surabaya");
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [gpsError, setGpsError] = useState("");
   const [now, setNow] = useState(() => Date.now());
 
-  async function load() {
+  async function load(coords?: { lat: number; lon: number }) {
     setLoading(true); setFailed(false);
     try {
-      const result = await fetchPrayerSchedule();
-      setSchedule(result.timings); setDateLabel(result.dateLabel);
+      const result = await fetchPrayerSchedule(coords);
+      setSchedule(result.timings); setDateLabel(result.dateLabel); setLocation(result.location);
     } catch {
       setFailed(true);
     } finally {
@@ -320,11 +332,23 @@ function usePrayerTimes() {
     }
   }
 
+  function useGps() {
+    if (!("geolocation" in navigator)) { setGpsError("Perangkat tidak mendukung GPS."); return; }
+    setLocating(true); setGpsError("");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        void load({ lat: position.coords.latitude, lon: position.coords.longitude }).finally(() => setLocating(false));
+      },
+      () => { setGpsError("Izin lokasi ditolak. Menampilkan jadwal Surabaya."); setLocating(false); },
+      { enableHighAccuracy: false, timeout: 10000 },
+    );
+  }
+
   useEffect(() => {
     let active = true;
     fetchPrayerSchedule().then((result) => {
       if (!active) return;
-      setSchedule(result.timings); setDateLabel(result.dateLabel); setLoading(false);
+      setSchedule(result.timings); setDateLabel(result.dateLabel); setLocation(result.location); setLoading(false);
     }).catch(() => {
       if (!active) return;
       setFailed(true); setLoading(false);
@@ -339,7 +363,7 @@ function usePrayerTimes() {
   const next = schedule ? prayerOnly.find((item) => timeToSeconds(schedule[item.key]) > nowSeconds) ?? prayerOnly[0] : null;
   const target = next && schedule ? timeToSeconds(schedule[next.key]) + (next.key === "Fajr" && timeToSeconds(schedule.Fajr) <= nowSeconds ? 86400 : 0) : 0;
   const countdown = target ? formatCountdown(target - nowSeconds) : "--:--:--";
-  return { schedule, dateLabel, loading, failed, next, countdown, reload: load };
+  return { schedule, dateLabel, location, loading, failed, next, countdown, reload: () => load(), useGps, locating, gpsError };
 }
 
 function timeToSeconds(value: string) {
@@ -355,18 +379,23 @@ function formatCountdown(value: number) {
 }
 
 function PrayerHero({ onOpen }: { onOpen: () => void }) {
-  const { schedule, next, countdown, loading, failed } = usePrayerTimes();
+  const { schedule, next, countdown, loading, failed, location, useGps, locating } = usePrayerTimes();
   return <section className="prayer-hero">
     <div className="roof-shape" aria-hidden="true"><i /><i /><i /></div>
-    <div className="prayer-copy"><span className="location-pill"><MapPin />Gunung Anyar, Surabaya</span><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong><small>Metode Kementerian Agama RI · WIB</small></div>
+    <div className="prayer-copy"><button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating} title="Gunakan lokasi GPS saya"><MapPin />{locating ? "Mencari lokasi..." : location}</button><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong><small>Metode Kementerian Agama RI · WIB</small></div>
     <button className="prayer-link" onClick={onOpen}>Lihat jadwal lengkap <ChevronRight /></button>
   </section>;
 }
 
 function PrayerPage() {
-  const { schedule, dateLabel, loading, failed, next, countdown, reload } = usePrayerTimes();
+  const { schedule, dateLabel, loading, failed, next, countdown, reload, location, useGps, locating, gpsError } = usePrayerTimes();
   return <div className="stack prayer-page">
-    <Intro eyebrow="WAKTU IBADAH" title="Jadwal Shalat Hari Ini" description="Jadwal untuk Gunung Anyar, Kota Surabaya, menggunakan metode Kementerian Agama Republik Indonesia." />
+    <Intro eyebrow="WAKTU IBADAH" title="Jadwal Shalat Hari Ini" description="Jadwal menggunakan metode Kementerian Agama Republik Indonesia. Sesuaikan lokasi dengan GPS untuk jadwal yang lebih akurat." />
+    <div className="finance-toolbar no-print">
+      <button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating}><MapPin />{locating ? "Mencari lokasi..." : location}</button>
+      <Button variant="outline" disabled={locating} onClick={useGps}><LocateFixed />{locating ? "Mencari..." : "Gunakan Lokasi GPS Saya"}</Button>
+    </div>
+    {gpsError && <p className="data-alert">{gpsError}</p>}
     <section className="prayer-focus"><div className="minaret-art" aria-hidden="true"><span /><i /></div><div><span>MENUJU WAKTU SALAT</span><h2>{next && schedule ? `${next.label} · ${schedule[next.key].slice(0, 5)}` : "Memuat jadwal"}</h2><strong>{countdown}</strong><small>{dateLabel || "Waktu Indonesia Barat"}</small></div></section>
     {failed ? <section className="prayer-error"><Clock3 /><h3>Jadwal belum dapat dimuat</h3><p>Periksa koneksi internet lalu coba kembali.</p><Button variant="outline" onClick={() => void reload()}><RefreshCw />Muat ulang</Button></section> : <div className="prayer-list">{prayerItems.map(({ key, label, icon: Icon }) => <article className={next?.key === key ? "next" : ""} key={key}><span><Icon /></span><div><small>{key === "Sunrise" ? "Matahari terbit" : "Waktu salat"}</small><strong>{label}</strong></div><b>{loading ? "--:--" : schedule?.[key]?.slice(0, 5) ?? "--:--"}</b>{next?.key === key && <em>Berikutnya</em>}</article>)}</div>}
     <p className="prayer-note">Jadwal bersifat panduan. Untuk iqamah dan perubahan kegiatan, ikuti pengumuman resmi takmir Masjid Baitul Fadli.</p>
@@ -455,10 +484,20 @@ function Intro({ eyebrow, title, description, children }: { eyebrow: string; tit
 }
 
 function Finance({ records, add, remove }: { records: DataRecord[]; add: () => void; remove: (record: DataRecord) => void }) {
-  const items = records.filter((item) => item.kind === "transaction");
+  const allItems = records.filter((item) => item.kind === "transaction");
+  const months = Array.from(new Set(allItems.map((item) => item.date.slice(0, 7)).filter(Boolean))).sort().reverse();
+  const [month, setMonth] = useState("");
+  const items = month ? allItems.filter((item) => item.date.slice(0, 7) === month) : allItems;
   const income = items.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
   const expense = items.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
-  return <div className="stack"><Intro eyebrow="TRANSPARAN & AKUNTABEL" title="Laporan Keuangan Masjid" description="Data keuangan hanya dapat dibuka dan dikelola oleh pengurus."><Button className="primary" onClick={add}><Plus />Catat Transaksi</Button></Intro><div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div><Panel title="Daftar Transaksi" action={items.length + " transaksi"}><div className="table"><div className="tr th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span>Nominal</span><span /></div>{items.map((item) => <div className="tr" key={item.id}><span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span><span>{item.date || "-"}</span><span><em>{item.category || "-"}</em></span><b className={item.type === "Pemasukan" ? "plus" : "minus"}>{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</b><button onClick={() => remove(item)} aria-label="Hapus transaksi"><Trash2 /></button></div>)}{!items.length && <p className="empty">Belum ada transaksi.</p>}</div></Panel></div>;
+  return <div className="stack">
+    <div className="print-header"><h1>Laporan Keuangan Masjid Baitul Fadli</h1><p>Periode: {month ? monthId(month) : "Seluruh periode"} · Dicetak {new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" }).format(new Date())}</p></div>
+    <Intro eyebrow="TRANSPARAN & AKUNTABEL" title="Laporan Keuangan Masjid" description="Data keuangan hanya dapat dibuka dan dikelola oleh pengurus."><Button className="primary" onClick={add}><Plus />Catat Transaksi</Button></Intro>
+    <div className="finance-toolbar no-print">
+      <label className="field">Filter bulan<select value={month} onChange={(event) => setMonth(event.target.value)}><option value="">Semua periode</option>{months.map((value) => <option key={value} value={value}>{monthId(value)}</option>)}</select></label>
+      <Button variant="outline" onClick={() => window.print()}><FileDown />Ekspor PDF</Button>
+    </div>
+    <div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div><Panel title="Daftar Transaksi" action={items.length + " transaksi"}><div className="table"><div className="tr th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span>Nominal</span><span /></div>{items.map((item) => <div className="tr" key={item.id}><span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span><span>{item.date || "-"}</span><span><em>{item.category || "-"}</em></span><b className={item.type === "Pemasukan" ? "plus" : "minus"}>{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</b><button className="no-print" onClick={() => remove(item)} aria-label="Hapus transaksi"><Trash2 /></button></div>)}{!items.length && <p className="empty">Belum ada transaksi.</p>}</div></Panel></div>;
 }
 function Programs({ records, admin, add, donate, remove }: { records: DataRecord[]; admin: boolean; add: () => void; donate: () => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "program");
@@ -505,6 +544,45 @@ function LoginModal({ close, login }: { close: () => void; login: (email: string
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal login-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">AKSES TERBATAS</p><h2>Masuk sebagai Pengurus</h2><p>Gunakan akun yang telah didaftarkan oleh administrator masjid.</p><label className="field">Email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field">Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Memeriksa..." : "Masuk"}</Button></form></div>;
 }
 function DonationModal({ close }: { close: () => void }) {
-  const [amount, setAmount] = useState(100000); const [done, setDone] = useState(false);
-  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><section className="modal"><button className="modal-x" onClick={close}><X /></button>{done ? <div className="success"><span><CheckCircle2 /></span><h2>Jazakumullahu khairan</h2><p>Silakan hubungi pengurus untuk memperoleh rekening resmi dan konfirmasi donasi.</p><div><small>Nominal yang dipilih</small><strong>{money(amount)}</strong></div><Button onClick={close}>Selesai</Button></div> : <><p className="eyebrow">DONASI MASJID</p><h2>Mulai kebaikan hari ini</h2><p>Pilih nominal donasi. Pastikan transfer hanya ke rekening resmi yang disampaikan pengurus.</p><div className="amounts">{[50000, 100000, 250000, 500000].map((value) => <button className={amount === value ? "chosen" : ""} onClick={() => setAmount(value)} key={value}>{money(value)}</button>)}</div><NumberField label="Nominal lainnya" value={amount} setValue={setAmount} /><Button className="primary" onClick={() => setDone(true)}>Lanjutkan <ChevronRight /></Button></>}</section></div>;
+  const [amount, setAmount] = useState(100000);
+  const [step, setStep] = useState<"amount" | "qris" | "done">("amount");
+  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><section className="modal">
+    <button className="modal-x" onClick={close}><X /></button>
+    {step === "done" ? <div className="success"><span><CheckCircle2 /></span><h2>Jazakumullahu khairan</h2><p>Konfirmasi donasi Anda akan diverifikasi oleh pengurus masjid.</p><div><small>Nominal yang dipilih</small><strong>{money(amount)}</strong></div><Button onClick={close}>Selesai</Button></div>
+      : step === "qris" ? <div className="qris-step">
+        <div className="donate-steps"><span className="active" /><span className="active" /><span /></div>
+        <p className="eyebrow">SCAN QRIS</p><h2>Bayar dengan QRIS</h2>
+        <Image src="/qris-masjid-baitul-fadli.svg" alt="Kode QRIS Masjid Baitul Fadli" width={230} height={230} />
+        <div className="qris-nominal"><small>Nominal donasi</small><strong>{money(amount)}</strong></div>
+        <p className="qris-hint">Buka aplikasi e-wallet, m-banking, atau dompet digital Anda, pilih Scan QRIS, lalu masukkan nominal di atas sebelum membayar.</p>
+        <Button className="primary" onClick={() => setStep("done")}>Saya Sudah Transfer <ChevronRight /></Button>
+      </div>
+      : <><div className="donate-steps"><span className="active" /><span /><span /></div><p className="eyebrow">DONASI MASJID</p><h2>Mulai kebaikan hari ini</h2><p>Pilih nominal donasi, lalu bayar langsung melalui QRIS masjid.</p><div className="amounts">{[50000, 100000, 250000, 500000].map((value) => <button className={amount === value ? "chosen" : ""} onClick={() => setAmount(value)} key={value}>{money(value)}</button>)}</div><NumberField label="Nominal lainnya" value={amount} setValue={setAmount} /><Button className="primary" disabled={!amount} onClick={() => setStep("qris")}><QrCode />Tampilkan QRIS</Button></>}
+  </section></div>;
+}
+function SupporterModal({ close, register }: { close: () => void; register: (data: SupporterEntry) => Promise<void> }) {
+  const [name, setName] = useState(""); const [phone, setPhone] = useState(""); const [address, setAddress] = useState("");
+  const [amount, setAmount] = useState(100000); const [frequency, setFrequency] = useState("Bulanan");
+  const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [done, setDone] = useState(false);
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!name || !phone) return setError("Nama dan nomor WhatsApp wajib diisi.");
+    setBusy(true); setError("");
+    try { await register({ name, phone, address, amount, frequency }); setDone(true); }
+    catch { setError("Gagal menyimpan pendaftaran. Silakan coba lagi."); }
+    finally { setBusy(false); }
+  }
+  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><section className="modal">
+    <button className="modal-x" onClick={close}><X /></button>
+    {done ? <div className="success"><span><CheckCircle2 /></span><h2>Terima kasih, {name}</h2><p>Pendaftaran donatur tetap Anda telah kami terima. Pengurus akan menghubungi Anda melalui WhatsApp untuk konfirmasi.</p><Button onClick={close}>Selesai</Button></div>
+      : <form onSubmit={submit}><p className="eyebrow">DONATUR TETAP</p><h2>Jadi Donatur Tetap</h2><p>Daftar sebagai donatur tetap bulanan untuk mendukung program dan operasional Masjid Baitul Fadli secara berkelanjutan.</p>
+        <label className="field">Nama lengkap<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
+        <label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} required /></label>
+        <label className="field">Alamat<input value={address} onChange={(event) => setAddress(event.target.value)} /></label>
+        <NumberField label="Rencana donasi per bulan" value={amount} setValue={setAmount} />
+        <label className="field">Frekuensi<select value={frequency} onChange={(event) => setFrequency(event.target.value)}><option>Bulanan</option><option>Mingguan</option></select></label>
+        {error && <p className="form-error">{error}</p>}
+        <Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : "Daftar Sekarang"}</Button>
+      </form>}
+  </section></div>;
 }
