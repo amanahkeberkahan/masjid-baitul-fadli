@@ -8,10 +8,17 @@ function jakartaDate() {
   return `${value.day}-${value.month}-${value.year}`;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const url = new URL(request.url);
+    const lat = Number(url.searchParams.get("lat"));
+    const lon = Number(url.searchParams.get("lon"));
+    const useGps = Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+
     const date = jakartaDate();
-    const endpoint = `https://api.aladhan.com/v1/timingsByCity/${date}?city=Surabaya&country=Indonesia&method=20`;
+    const endpoint = useGps
+      ? `https://api.aladhan.com/v1/timings/${date}?latitude=${lat}&longitude=${lon}&method=20`
+      : `https://api.aladhan.com/v1/timingsByCity/${date}?city=Surabaya&country=Indonesia&method=20`;
     const response = await fetch(endpoint, { next: { revalidate: 21600 } });
     if (!response.ok) throw new Error("Prayer API request failed");
     const payload = await response.json() as {
@@ -24,9 +31,9 @@ export async function GET() {
     return Response.json({
       timings,
       dateLabel: `${payload.data.date.readable} · ${payload.data.date.hijri.date} ${payload.data.date.hijri.month.en}`,
-      location: "Gunung Anyar, Surabaya",
+      location: useGps ? `Lokasi Anda (${lat.toFixed(3)}, ${lon.toFixed(3)})` : "Gunung Anyar, Surabaya",
       method: "Kementerian Agama Republik Indonesia",
-    }, { headers: { "Cache-Control": "public, s-maxage=21600, stale-while-revalidate=86400" } });
+    }, { headers: { "Cache-Control": useGps ? "no-store" : "public, s-maxage=21600, stale-while-revalidate=86400" } });
   } catch {
     return Response.json({ error: "Jadwal salat belum tersedia." }, { status: 503 });
   }
