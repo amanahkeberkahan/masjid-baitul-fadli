@@ -653,14 +653,34 @@ function Finance({ records, add, remove }: { records: DataRecord[]; add: () => v
   const items = month ? allItems.filter((item) => item.date.slice(0, 7) === month) : allItems;
   const income = items.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
   const expense = items.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
+  const periodLabel = month ? monthId(month) : "Seluruh periode";
+  const printedLabel = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" }).format(new Date());
   return <div className="stack">
-    <div className="print-header"><h1>Laporan Keuangan Masjid Baitul Fadli</h1><p>Periode: {month ? monthId(month) : "Seluruh periode"} · Dicetak {new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" }).format(new Date())}</p></div>
-    <Intro eyebrow="TRANSPARAN & AKUNTABEL" title="Laporan Keuangan Masjid" description="Data keuangan hanya dapat dibuka dan dikelola oleh pengurus."><Button className="primary" onClick={add}><Plus />Catat Transaksi</Button></Intro>
-    <div className="finance-toolbar no-print">
-      <label className="field">Filter bulan<select value={month} onChange={(event) => setMonth(event.target.value)}><option value="">Semua periode</option>{months.map((value) => <option key={value} value={value}>{monthId(value)}</option>)}</select></label>
-      <Button variant="outline" onClick={() => window.print()}><FileDown />Ekspor PDF</Button>
+    <div className="print-header"><h1>Laporan Keuangan Masjid Baitul Fadli</h1><p>Periode: {periodLabel} · Dicetak {printedLabel}</p></div>
+    <div className="no-print">
+      <Intro eyebrow="TRANSPARAN & AKUNTABEL" title="Laporan Keuangan Masjid" description="Data keuangan hanya dapat dibuka dan dikelola oleh pengurus."><Button className="primary" onClick={add}><Plus />Catat Transaksi</Button></Intro>
+      <div className="finance-toolbar">
+        <label className="field">Filter bulan<select value={month} onChange={(event) => setMonth(event.target.value)}><option value="">Semua periode</option>{months.map((value) => <option key={value} value={value}>{monthId(value)}</option>)}</select></label>
+        <Button variant="outline" onClick={() => window.print()}><FileDown />Ekspor PDF</Button>
+      </div>
+      <div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div>
+      <Panel title="Daftar Transaksi" action={items.length + " transaksi"}><div className="table"><div className="tr th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span>Nominal</span><span /></div>{items.map((item) => <div className="tr" key={item.id}><span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span><span>{item.date || "-"}</span><span><em>{item.category || "-"}</em></span><b className={item.type === "Pemasukan" ? "plus" : "minus"}>{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</b><button onClick={() => remove(item)} aria-label="Hapus transaksi"><Trash2 /></button></div>)}{!items.length && <p className="empty">Belum ada transaksi.</p>}</div></Panel>
     </div>
-    <div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div><Panel title="Daftar Transaksi" action={items.length + " transaksi"}><div className="table"><div className="tr th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span>Nominal</span><span /></div>{items.map((item) => <div className="tr" key={item.id}><span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span><span>{item.date || "-"}</span><span><em>{item.category || "-"}</em></span><b className={item.type === "Pemasukan" ? "plus" : "minus"}>{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</b><button className="no-print" onClick={() => remove(item)} aria-label="Hapus transaksi"><Trash2 /></button></div>)}{!items.length && <p className="empty">Belum ada transaksi.</p>}</div></Panel></div>;
+    <table className="print-summary"><tbody>
+      <tr><td>Total Pemasukan</td><td>{money(income)}</td></tr>
+      <tr><td>Total Pengeluaran</td><td>{money(expense)}</td></tr>
+      <tr className="total"><td>Saldo {periodLabel}</td><td>{money(income - expense)}</td></tr>
+    </tbody></table>
+    <table className="print-table">
+      <thead><tr><th>No</th><th>Tanggal</th><th>Uraian</th><th>Kategori</th><th>Jenis</th><th>Nominal</th></tr></thead>
+      <tbody>{items.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td>{item.date || "-"}</td><td>{item.title}</td><td>{item.category || "-"}</td><td>{item.type}</td><td className="num">{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</td></tr>)}
+      {!items.length && <tr><td colSpan={6}>Belum ada transaksi pada periode ini.</td></tr>}</tbody>
+    </table>
+    <div className="print-signature">
+      <div><span>Mengetahui,</span><strong>Ketua Takmir</strong><em>Masjid Baitul Fadli</em><i className="sign-line" /><small>( ..................................... )</small></div>
+      <div><span>Dibuat oleh,</span><strong>Bendahara</strong><em>Masjid Baitul Fadli</em><i className="sign-line" /><small>( ..................................... )</small></div>
+    </div>
+  </div>;
 }
 function Programs({ records, admin, add, donate, remove }: { records: DataRecord[]; admin: boolean; add: () => void; donate: () => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "program");
