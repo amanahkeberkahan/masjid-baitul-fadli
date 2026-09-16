@@ -11,10 +11,6 @@ const geist = localFont({
 export const metadata: Metadata = {
   title: "Masjid Baitul Fadli | Pusat Layanan Jamaah",
   description: "Informasi keuangan, kegiatan jamaah, dan program donasi Masjid Baitul Fadli.",
-  icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
-  },
 };
 
 export default function RootLayout({

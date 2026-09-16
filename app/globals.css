@@ -49,13 +49,11 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
   .modern-welcome .mosque-photo::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 50%,#fff 100%)}
   .modern-welcome .mosque-photo img{object-fit:cover;object-position:center 55%}
   .modern-welcome .welcome-copy{position:relative;z-index:2;margin-top:-16px;padding:22px 19px 24px;background:#fff;border-radius:22px 22px 0 0}
-  .public-stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}
-  .public-stats .stat{padding:14px}
+  .public-stats{grid-template-columns:minmax(0,1fr)!important}
+  .public-stats .stat{padding:16px}
   .public-stats .stat:first-child{grid-column:auto;border-left:0}
-  .public-stats .stat>strong{font-size:15px}
-  .public-stats .stat>small{font-size:11px}
 }
-@media(max-width:390px){.modern-welcome .mosque-photo{height:132px;min-height:132px}.public-stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important}.public-stats .stat>strong{font-size:14px}}
+@media(max-width:390px){.modern-welcome .mosque-photo{height:132px;min-height:132px}}
 
 .finance-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.finance-toolbar .field{margin:0;min-width:170px}.finance-toolbar .field>div{height:45px}.print-header{display:none}
 @media print{.sidebar,.bottom-nav,.clean-header,.no-print{display:none!important}.shell>main{margin-left:0!important}.page{padding:0!important;max-width:100%!important}.print-header{display:block!important;margin-bottom:18px}.print-header h1{font:24px Georgia,serif;margin:0 0 4px}.print-header p{margin:0;color:#444;font-size:13px}.panel,.stat{box-shadow:none!important;break-inside:avoid}}
