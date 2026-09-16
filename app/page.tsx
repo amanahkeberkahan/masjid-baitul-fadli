@@ -3,29 +3,33 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import type { User } from "firebase/auth";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
 import {
   addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, writeBatch, type DocumentData, type QueryDocumentSnapshot, type Unsubscribe,
 } from "firebase/firestore";
+import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import {
-  ArrowDownLeft, ArrowUpRight, CalendarDays, CheckCircle2, ChevronRight,
-  Clock3, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
-  Moon, Plus, QrCode, RefreshCw, Settings, ShieldCheck, Sun, Trash2, UserPlus, Users, Wallet, X,
+  ArrowDownLeft, ArrowUpRight, Building2, CalendarDays, CheckCircle2, ChevronRight,
+  Clock3, Download, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
+  Moon, Plus, QrCode, RefreshCw, Settings, ShieldCheck, Sun, Tags, Trash2, Upload, UserPlus, Users, Wallet, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { auth, db } from "@/lib/firebase";
+import { auth, db, getSecondaryAuth, storage } from "@/lib/firebase";
 import historicalTransactions from "@/data/finance-history.json";
 
-type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "pengaturan" | "menu";
-type Kind = "transaction" | "program" | "event" | "member";
+type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "master" | "pengaturan" | "menu";
+type Kind = "transaction" | "program" | "event" | "member" | "structure";
 type DataRecord = {
   id: string; kind: Kind; title: string; date: string; amount: number; type: string;
   category: string; details: string; target: number; phone: string; address: string;
 };
 type SaveRecord = Omit<DataRecord, "id">;
 type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string };
+type CategoryItem = { id: string; name: string; type: string };
+type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string };
+type AdminAccount = { id: string; email: string; active: boolean };
 type FinanceSummary = {
   income: number; expense: number; balance: number; transactionCount: number;
   openingBalance: number; periodIncome: number; periodExpense: number; period: string;
@@ -33,7 +37,7 @@ type FinanceSummary = {
 };
 
 const paths: Record<Kind, string> = {
-  transaction: "transactions", program: "programs", event: "events", member: "members",
+  transaction: "transactions", program: "programs", event: "events", member: "members", structure: "orgStructure",
 };
 const publicNav = [
   ["beranda", "Beranda", Home],
@@ -44,6 +48,7 @@ const publicNav = [
 const privateNav = [
   ["keuangan", "Keuangan", Wallet],
   ["jamaah", "Data Jamaah", Users],
+  ["master", "Master Data", Tags],
 ] as const;
 const money = (value: number) => new Intl.NumberFormat("id-ID", {
   style: "currency", currency: "IDR", maximumFractionDigits: 0,
@@ -114,6 +119,10 @@ export default function Page() {
   const [admin, setAdmin] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary>(historicalFinance);
+  const [financeCategories, setFinanceCategories] = useState<CategoryItem[]>([]);
+  const [memberCategories, setMemberCategories] = useState<CategoryItem[]>([]);
+  const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "" });
+  const [admins, setAdmins] = useState<AdminAccount[]>([]);
   const [error, setError] = useState("");
   const lastLogoTap = useRef(0);
 
@@ -160,9 +169,33 @@ export default function Page() {
     if (admin) {
       subscribe("transaction");
       subscribe("member");
+      subscribe("structure");
+      const mapCategory = (item: QueryDocumentSnapshot<DocumentData>): CategoryItem => {
+        const data = item.data();
+        return { id: item.id, name: String(data.name ?? ""), type: String(data.type ?? "") };
+      };
+      const subscribeCategories = (path: string, setValue: (value: CategoryItem[]) => void) => {
+        unsubscribers.push(onSnapshot(query(collection(db, path), orderBy("name")), (snapshot) => {
+          setValue(snapshot.docs.map(mapCategory));
+        }, () => undefined));
+      };
+      subscribeCategories("financeCategories", setFinanceCategories);
+      subscribeCategories("memberCategories", setMemberCategories);
+      unsubscribers.push(onSnapshot(collection(db, "admins"), (snapshot) => {
+        setAdmins(snapshot.docs.map((item) => ({ id: item.id, email: String(item.data().email ?? ""), active: item.data().active === true })));
+      }, () => undefined));
     }
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [admin]);
+
+  useEffect(() => onSnapshot(doc(db, "settings", "donation"), (snapshot) => {
+    if (!snapshot.exists()) return;
+    const data = snapshot.data();
+    setDonationSettings({
+      bankName: String(data.bankName ?? ""), accountNumber: String(data.accountNumber ?? ""),
+      accountHolder: String(data.accountHolder ?? ""), qrisUrl: String(data.qrisUrl ?? ""),
+    });
+  }, () => undefined), []);
 
   useEffect(() => onSnapshot(doc(db, "publicStats", "finance"), (snapshot) => {
     if (!snapshot.exists()) return;
@@ -210,6 +243,42 @@ export default function Page() {
       ...data, status: "baru", createdAt: serverTimestamp(),
     });
   }
+  async function addCategory(path: string, name: string, type: string) {
+    if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
+    await addDoc(collection(db, path), { name, type, createdAt: serverTimestamp() });
+  }
+  async function removeCategory(path: string, id: string) {
+    if (!admin || !confirm("Hapus kategori ini?")) return;
+    await deleteDoc(doc(db, path, id));
+  }
+  async function saveDonationSettings(data: DonationSettings) {
+    if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
+    await setDoc(doc(db, "settings", "donation"), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+  }
+  async function uploadQris(file: File) {
+    if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
+    const fileRef = storageRef(storage, "qris/donasi-masjid-baitul-fadli.png");
+    await uploadBytes(fileRef, file);
+    const url = await getDownloadURL(fileRef);
+    await setDoc(doc(db, "settings", "donation"), { qrisUrl: url, updatedAt: serverTimestamp() }, { merge: true });
+    return url;
+  }
+  async function addAdminAccount(email: string, password: string) {
+    if (!admin || !user) throw new Error("Silakan masuk sebagai pengurus.");
+    const secondaryAuth = getSecondaryAuth();
+    const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+    await setDoc(doc(db, "admins", credential.user.uid), {
+      email, active: true, createdAt: serverTimestamp(), createdBy: user.uid,
+    });
+    await signOut(secondaryAuth);
+  }
+  async function toggleAdminActive(account: AdminAccount) {
+    if (!admin) return;
+    if (account.id === user?.uid && account.active) {
+      if (!confirm("Ini akun Anda sendiri. Nonaktifkan akses pengurus untuk akun ini?")) return;
+    }
+    await setDoc(doc(db, "admins", account.id), { active: !account.active }, { merge: true });
+  }
 
   function handleLogoTap() {
     if (admin || !authReady) return;
@@ -247,15 +316,16 @@ export default function Page() {
           : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} remove={remove} />
           : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} remove={remove} />
-          : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} />
+          : view === "master" && admin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
+          : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
           : view === "menu" && admin && user ? <AdminMenu go={setView} logout={logout} />
           : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} />}
       </div>
     </main>
-    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
-    {form && <EntryForm kind={form} close={() => setForm(null)} save={save} />}
+    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
+    {form && <EntryForm kind={form} close={() => setForm(null)} save={save} financeCategories={financeCategories} memberCategories={memberCategories} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
-    {donateOpen && <DonationModal close={() => setDonateOpen(false)} />}
+    {donateOpen && <DonationModal close={() => setDonateOpen(false)} donationSettings={donationSettings} />}
     {supporterOpen && <SupporterModal close={() => setSupporterOpen(false)} register={registerSupporter} />}
   </div>;
 }
@@ -405,14 +475,69 @@ function AdminMenu({ go, logout }: { go: (view: View) => void; logout: () => Pro
   const items = [
     ["kegiatan", "Kelola Kegiatan", "Publikasikan agenda masjid", CalendarDays],
     ["jamaah", "Data Jamaah", "Data privat khusus pengurus", Users],
-    ["pengaturan", "Pengaturan", "Akun, Firestore, dan impor data", Settings],
+    ["master", "Master Data", "Kategori, struktur organisasi", Tags],
+    ["pengaturan", "Pengaturan", "Akun, QRIS, dan impor data", Settings],
   ] as const;
   return <div className="stack"><Intro eyebrow="MENU PENGURUS" title="Kelola Masjid" description="Fitur administrasi hanya tampil setelah akun pengurus terverifikasi." /><div className="admin-menu">{items.map(([id, title, note, Icon]) => <button key={id} onClick={() => go(id)}><span><Icon /></span><div><strong>{title}</strong><small>{note}</small></div><ChevronRight /></button>)}<button className="logout-menu" onClick={() => void logout()}><span><LogOut /></span><div><strong>Keluar</strong><small>Tutup akses pengurus di perangkat ini</small></div><ChevronRight /></button></div></div>;
 }
 
-function SettingsPage({ user, logout }: { user: User; logout: () => Promise<void> }) {
+function SettingsPage({ user, logout, donationSettings, saveDonationSettings, uploadQris, admins, addAdminAccount, toggleAdminActive }: {
+  user: User; logout: () => Promise<void>; donationSettings: DonationSettings;
+  saveDonationSettings: (data: DonationSettings) => Promise<void>; uploadQris: (file: File) => Promise<string>;
+  admins: AdminAccount[]; addAdminAccount: (email: string, password: string) => Promise<void>; toggleAdminActive: (account: AdminAccount) => Promise<void>;
+}) {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState("");
+  const [bankName, setBankName] = useState(donationSettings.bankName);
+  const [accountNumber, setAccountNumber] = useState(donationSettings.accountNumber);
+  const [accountHolder, setAccountHolder] = useState(donationSettings.accountHolder);
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [accountResult, setAccountResult] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState("");
+  const [newEmail, setNewEmail] = useState(""); const [newPassword, setNewPassword] = useState("");
+  const [addingAdmin, setAddingAdmin] = useState(false); const [adminResult, setAdminResult] = useState("");
+
+  async function submitAccount(event: React.FormEvent) {
+    event.preventDefault();
+    setSavingAccount(true); setAccountResult("");
+    try {
+      await saveDonationSettings({ bankName, accountNumber, accountHolder, qrisUrl: donationSettings.qrisUrl });
+      setAccountResult("Informasi rekening tersimpan.");
+    } catch {
+      setAccountResult("Gagal menyimpan. Pastikan Rules Firestore mengizinkan pengurus menulis settings/donation.");
+    } finally {
+      setSavingAccount(false);
+    }
+  }
+  async function handleQrisUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setUploading(true); setUploadResult("");
+    try {
+      await uploadQris(file);
+      setUploadResult("QRIS berhasil diunggah dan langsung tampil di halaman donasi.");
+    } catch {
+      setUploadResult("Gagal mengunggah QRIS. Pastikan Firebase Storage sudah aktif dan Rules mengizinkan pengurus menulis.");
+    } finally {
+      setUploading(false);
+    }
+  }
+  async function submitAdmin(event: React.FormEvent) {
+    event.preventDefault();
+    if (newPassword.length < 6) return setAdminResult("Password minimal 6 karakter.");
+    setAddingAdmin(true); setAdminResult("");
+    try {
+      await addAdminAccount(newEmail, newPassword);
+      setAdminResult(`Akun pengurus ${newEmail} berhasil dibuat.`);
+      setNewEmail(""); setNewPassword("");
+    } catch (caught) {
+      setAdminResult(caught instanceof Error ? caught.message : "Gagal membuat akun pengurus.");
+    } finally {
+      setAddingAdmin(false);
+    }
+  }
 
   async function importFinanceHistory() {
     if (!confirm("Impor 779 transaksi sampai 11 September 2026? Data lama dengan ID yang sama akan diperbarui, bukan digandakan.")) return;
@@ -454,9 +579,48 @@ function SettingsPage({ user, logout }: { user: User; logout: () => Promise<void
     <div className="settings-grid">
       <section className="setting-card"><span><ShieldCheck /></span><div><small>AKUN AKTIF</small><h3>{user.email}</h3><p>Akun ini terdaftar sebagai pengurus aktif dan dapat mengelola data masjid.</p></div></section>
       <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Firebase Firestore</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>
+      <section className="setting-card wide admin-accounts">
+        <span><UserPlus /></span>
+        <div>
+          <small>AKUN PENGURUS</small>
+          <h3>Kelola Akses Pengurus</h3>
+          <p>Tambahkan akun pengurus baru atau nonaktifkan akses pengurus yang sudah tidak aktif.</p>
+          <div className="admin-list">
+            {admins.map((account) => <div className="admin-row" key={account.id}><span className={account.active ? "on" : "off"}><ShieldCheck /></span><div><strong>{account.email || account.id}</strong><small>{account.active ? "Aktif" : "Nonaktif"}</small></div><Button variant="outline" onClick={() => void toggleAdminActive(account)}>{account.active ? "Nonaktifkan" : "Aktifkan"}</Button></div>)}
+            {!admins.length && <p className="empty">Belum ada data akun pengurus.</p>}
+          </div>
+          <form className="account-form" onSubmit={submitAdmin}>
+            <label className="field">Email pengurus baru<input type="email" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} required /></label>
+            <label className="field">Password awal<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={6} required /></label>
+            {adminResult && <p className="import-result">{adminResult}</p>}
+            <Button className="primary" disabled={addingAdmin}>{addingAdmin ? "Membuat akun..." : "Tambah Akun Pengurus"}</Button>
+          </form>
+        </div>
+      </section>
       <section className="setting-card wide finance-import"><span><Wallet /></span><div><small>RIWAYAT KEUANGAN</small><h3>Data sampai 11 September 2026</h3><p>Impor 779 transaksi dari laporan lama. Proses ini aman dijalankan ulang karena menggunakan ID tetap sehingga tidak menggandakan data.</p>{importResult && <p className="import-result">{importResult}</p>}</div><Button className="primary" disabled={importing} onClick={importFinanceHistory}>{importing ? "Mengimpor..." : "Impor ke Firestore"}</Button></section>
       <section className="setting-card wide"><span><Landmark /></span><div><small>IDENTITAS APLIKASI</small><h3>Masjid Baitul Fadli</h3><p>Logo resmi dan nama masjid telah diterapkan pada tampilan aplikasi.</p></div><Button variant="outline" onClick={logout}><LogOut />Keluar dari akun</Button></section>
+      <section className="setting-card wide qris-settings">
+        <span><QrCode /></span>
+        <div>
+          <small>QRIS & REKENING DONASI</small>
+          <h3>Kelola Metode Donasi</h3>
+          <p>Unggah QRIS resmi masjid dan lengkapi info rekening. Keduanya akan tampil saat jamaah donasi.</p>
+          <form className="account-form" onSubmit={submitAccount}>
+            <label className="field">Nama Bank<input value={bankName} onChange={(event) => setBankName(event.target.value)} placeholder="Contoh: Bank Jatim Syariah" /></label>
+            <label className="field">Nomor Rekening<input value={accountNumber} onChange={(event) => setAccountNumber(event.target.value)} /></label>
+            <label className="field">Atas Nama<input value={accountHolder} onChange={(event) => setAccountHolder(event.target.value)} placeholder="Contoh: Masjid Baitul Fadli" /></label>
+            {accountResult && <p className="import-result">{accountResult}</p>}
+            <Button className="primary" disabled={savingAccount}>{savingAccount ? "Menyimpan..." : "Simpan Rekening"}</Button>
+          </form>
+          <div className="qris-upload">
+            {donationSettings.qrisUrl ? <Image src={donationSettings.qrisUrl} alt="QRIS Masjid Baitul Fadli" width={140} height={140} unoptimized /> : <p className="empty">Belum ada QRIS diunggah.</p>}
+            <label className="upload-button"><Upload />{uploading ? "Mengunggah..." : "Unggah QRIS Baru"}<input type="file" accept="image/*" onChange={handleQrisUpload} disabled={uploading} hidden /></label>
+          </div>
+          {uploadResult && <p className="import-result">{uploadResult}</p>}
+        </div>
+      </section>
     </div>
+    <p className="app-signature">Powered by: PT Multi Power Abadi</p>
   </div>;
 }
 
@@ -508,17 +672,70 @@ function Events({ records, admin, add, remove }: { records: DataRecord[]; admin:
 }
 function Members({ records, add, remove }: { records: DataRecord[]; add: () => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "member");
-  return <div className="stack"><Intro eyebrow="DATABASE JAMAAH" title="Jamaah Masjid Baitul Fadli" description="Data pribadi jamaah hanya dapat dibuka pengurus."><Button className="primary" onClick={add}><Plus />Tambah Jamaah</Button></Intro><div className="stats three"><Stat label="Total Jamaah" value={String(items.length)} note="Data Firestore" icon={<Users />} color="green" /><Stat label="Relawan" value={String(items.filter((item) => item.category === "Relawan").length)} note="Siap membantu" icon={<HeartHandshake />} color="blue" /><Stat label="Kepala Keluarga" value={String(items.filter((item) => item.type === "Kepala Keluarga").length)} note="Terdata" icon={<Home />} color="gold" /></div><Panel title="Daftar Jamaah" action={items.length + " jamaah"}><div className="members">{items.map((item) => <article key={item.id}><span>{item.title.split(" ").map((word) => word[0]).slice(0, 2).join("")}</span><div><strong>{item.title}</strong><small>{item.phone || "-"} · {item.address || "-"}</small></div><button onClick={() => remove(item)} aria-label="Hapus jamaah"><Trash2 /></button></article>)}{!items.length && <p className="empty">Belum ada jamaah.</p>}</div></Panel></div>;
+  return <div className="stack"><Intro eyebrow="DATABASE JAMAAH" title="Jamaah Masjid Baitul Fadli" description="Data pribadi jamaah hanya dapat dibuka pengurus."><Button className="primary" onClick={add}><Plus />Tambah Jamaah</Button></Intro><div className="stats three"><Stat label="Total Jamaah" value={String(items.length)} note="Data Firestore" icon={<Users />} color="green" /><Stat label="Jamaah Mukim" value={String(items.filter((item) => item.type === "Mukim").length)} note="Berdomisili tetap" icon={<Home />} color="gold" /><Stat label="Non-Mukim" value={String(items.filter((item) => item.type === "Non-Mukim").length)} note="Tidak berdomisili tetap" icon={<Users />} color="blue" /></div><Panel title="Daftar Jamaah" action={items.length + " jamaah"}><div className="members">{items.map((item) => <article key={item.id}><span>{item.title.split(" ").map((word) => word[0]).slice(0, 2).join("")}</span><div><strong>{item.title}</strong><small>{item.phone || "-"} · {item.address || "-"}{item.type && ` · ${item.type}`}{item.category && ` · ${item.category}`}</small></div><button onClick={() => remove(item)} aria-label="Hapus jamaah"><Trash2 /></button></article>)}{!items.length && <p className="empty">Belum ada jamaah.</p>}</div></Panel></div>;
 }
 
-function EntryForm({ kind, close, save }: { kind: Kind; close: () => void; save: (data: SaveRecord) => Promise<void> }) {
+function MasterData({ records, financeCategories, memberCategories, addCategory, removeCategory, addStructure, remove }: {
+  records: DataRecord[]; financeCategories: CategoryItem[]; memberCategories: CategoryItem[];
+  addCategory: (path: string, name: string, type: string) => Promise<void>;
+  removeCategory: (path: string, id: string) => Promise<void>;
+  addStructure: () => void; remove: (record: DataRecord) => void;
+}) {
+  const structure = records.filter((item) => item.kind === "structure");
+  return <div className="stack">
+    <Intro eyebrow="MASTER DATA" title="Kategori & Struktur Organisasi" description="Kelola daftar kategori transaksi, kategori jamaah, dan struktur pengurus masjid." />
+    <Panel title="Kategori Keuangan" action={financeCategories.length + " kategori"}>
+      <CategoryManager items={financeCategories} path="financeCategories" withType add={addCategory} remove={removeCategory} />
+    </Panel>
+    <Panel title="Kategori Jamaah" action={memberCategories.length + " kategori"}>
+      <CategoryManager items={memberCategories} path="memberCategories" add={addCategory} remove={removeCategory} />
+    </Panel>
+    <section className="panel">
+      <div className="panel-head"><h3>Struktur Organisasi</h3><button onClick={addStructure}>Tambah<Plus /></button></div>
+      <div className="org-list">
+        {structure.map((item) => <article className="org-card" key={item.id}><span><Building2 /></span><div><strong>{item.title}</strong><small>{item.category || "Pengurus"}{item.phone && ` · ${item.phone}`}</small></div><button onClick={() => remove(item)} aria-label="Hapus struktur"><Trash2 /></button></article>)}
+        {!structure.length && <p className="empty">Belum ada data struktur organisasi.</p>}
+      </div>
+    </section>
+  </div>;
+}
+function CategoryManager({ items, path, withType, add, remove }: {
+  items: CategoryItem[]; path: string; withType?: boolean;
+  add: (path: string, name: string, type: string) => Promise<void>;
+  remove: (path: string, id: string) => Promise<void>;
+}) {
+  const [name, setName] = useState(""); const [type, setType] = useState("Pemasukan");
+  const [busy, setBusy] = useState(false); const [error, setError] = useState("");
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    setBusy(true); setError("");
+    try { await add(path, name.trim(), withType ? type : ""); setName(""); }
+    catch { setError("Gagal menyimpan kategori."); }
+    finally { setBusy(false); }
+  }
+  return <div className="category-manager">
+    <form className="category-form" onSubmit={submit}>
+      <input placeholder="Nama kategori" value={name} onChange={(event) => setName(event.target.value)} />
+      {withType && <select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select>}
+      <Button disabled={busy || !name.trim()}><Plus />Tambah</Button>
+    </form>
+    {error && <p className="form-error">{error}</p>}
+    <div className="category-list">
+      {items.map((item) => <span className="category-chip" key={item.id}>{withType && <em className={item.type === "Pemasukan" ? "in" : "out"}>{item.type}</em>}{item.name}<button onClick={() => remove(path, item.id)} aria-label="Hapus kategori"><X /></button></span>)}
+      {!items.length && <p className="empty">Belum ada kategori.</p>}
+    </div>
+  </div>;
+}
+
+function EntryForm({ kind, close, save, financeCategories, memberCategories }: { kind: Kind; close: () => void; save: (data: SaveRecord) => Promise<void>; financeCategories: CategoryItem[]; memberCategories: CategoryItem[] }) {
   const [title, setTitle] = useState(""); const [date, setDate] = useState("");
   const [amount, setAmount] = useState(0); const [target, setTarget] = useState(0);
-  const [type, setType] = useState(kind === "transaction" ? "Pemasukan" : kind === "member" ? "Jamaah" : "");
+  const [type, setType] = useState(kind === "transaction" ? "Pemasukan" : kind === "member" ? "Mukim" : "");
   const [category, setCategory] = useState(""); const [details, setDetails] = useState("");
   const [phone, setPhone] = useState(""); const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false); const [error, setError] = useState("");
-  const labels = { transaction: "Transaksi", program: "Program Donasi", event: "Kegiatan", member: "Jamaah" };
+  const labels = { transaction: "Transaksi", program: "Program Donasi", event: "Kegiatan", member: "Jamaah", structure: "Struktur Organisasi" };
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!title) return setError("Nama/judul wajib diisi.");
@@ -527,8 +744,12 @@ function EntryForm({ kind, close, save }: { kind: Kind; close: () => void; save:
     catch (caught) { setError(caught instanceof Error ? caught.message : "Gagal menyimpan data."); }
     finally { setBusy(false); }
   }
-  const options = kind === "transaction" ? ["Infak", "Operasional", "Sosial", "Pembangunan"] : kind === "program" ? ["Fasilitas", "Sosial", "Operasional"] : kind === "event" ? ["Kajian", "Sosial", "Pendidikan"] : ["Jamaah", "Relawan"];
-  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>Tambah {labels[kind]}</h2><label className="field">{kind === "member" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "transaction" && <><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status<select value={type} onChange={(event) => setType(event.target.value)}><option>Jamaah</option><option>Kepala Keluarga</option></select></label></>}<label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : "Simpan Data"}</Button></form></div>;
+  const financeOptions = financeCategories.filter((item) => item.type === type).map((item) => item.name);
+  const memberOptions = memberCategories.map((item) => item.name);
+  const options = kind === "transaction" ? (financeOptions.length ? financeOptions : ["Infak", "Operasional", "Sosial", "Pembangunan"])
+    : kind === "program" ? ["Fasilitas", "Sosial", "Operasional"] : kind === "event" ? ["Kajian", "Sosial", "Pendidikan"]
+    : kind === "member" ? (memberOptions.length ? memberOptions : ["Jamaah", "Relawan"]) : [];
+  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>Tambah {labels[kind]}</h2><label className="field">{kind === "member" || kind === "structure" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "transaction" && <><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status Domisili<select value={type} onChange={(event) => setType(event.target.value)}><option>Mukim</option><option>Non-Mukim</option></select></label></>}{kind === "structure" && <><label className="field">Jabatan<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Contoh: Ketua Takmir" /></label><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></>}{kind !== "structure" && <label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>}{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : "Simpan Data"}</Button></form></div>;
 }
 function NumberField({ label, value, setValue }: { label: string; value: number; setValue: (value: number) => void }) {
   return <label className="field">{label}<input type="number" min="0" value={value || ""} onChange={(event) => setValue(Number(event.target.value))} /></label>;
@@ -542,17 +763,21 @@ function LoginModal({ close, login }: { close: () => void; login: (email: string
   }
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal login-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">AKSES TERBATAS</p><h2>Masuk sebagai Pengurus</h2><p>Gunakan akun yang telah didaftarkan oleh administrator masjid.</p><label className="field">Email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field">Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Memeriksa..." : "Masuk"}</Button></form></div>;
 }
-function DonationModal({ close }: { close: () => void }) {
+function DonationModal({ close, donationSettings }: { close: () => void; donationSettings: DonationSettings }) {
   const [amount, setAmount] = useState(100000);
   const [step, setStep] = useState<"amount" | "qris" | "done">("amount");
+  const qrisSrc = donationSettings.qrisUrl || "/qris-masjid-baitul-fadli.svg";
+  const hasAccount = donationSettings.bankName || donationSettings.accountNumber;
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><section className="modal">
     <button className="modal-x" onClick={close}><X /></button>
     {step === "done" ? <div className="success"><span><CheckCircle2 /></span><h2>Jazakumullahu khairan</h2><p>Konfirmasi donasi Anda akan diverifikasi oleh pengurus masjid.</p><div><small>Nominal yang dipilih</small><strong>{money(amount)}</strong></div><Button onClick={close}>Selesai</Button></div>
       : step === "qris" ? <div className="qris-step">
         <div className="donate-steps"><span className="active" /><span className="active" /><span /></div>
         <p className="eyebrow">SCAN QRIS</p><h2>Bayar dengan QRIS</h2>
-        <Image src="/qris-masjid-baitul-fadli.svg" alt="Kode QRIS Masjid Baitul Fadli" width={230} height={230} />
+        <Image src={qrisSrc} alt="Kode QRIS Masjid Baitul Fadli" width={230} height={230} unoptimized={!!donationSettings.qrisUrl} />
+        <a className="qris-download" href={qrisSrc} download="QRIS-Masjid-Baitul-Fadli.png" target="_blank" rel="noopener"><Download />Download QRIS</a>
         <div className="qris-nominal"><small>Nominal donasi</small><strong>{money(amount)}</strong></div>
+        {hasAccount && <div className="qris-account"><small>Atau transfer ke rekening</small><strong>{donationSettings.bankName}</strong><span>{donationSettings.accountNumber} a.n. {donationSettings.accountHolder}</span></div>}
         <p className="qris-hint">Buka aplikasi e-wallet, m-banking, atau dompet digital Anda, pilih Scan QRIS, lalu masukkan nominal di atas sebelum membayar.</p>
         <Button className="primary" onClick={() => setStep("done")}>Saya Sudah Transfer <ChevronRight /></Button>
       </div>
