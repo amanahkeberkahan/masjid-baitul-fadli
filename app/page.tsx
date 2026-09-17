@@ -12,7 +12,7 @@ import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage
 import {
   ArrowDownLeft, ArrowUpRight, Building2, CalendarDays, CheckCircle2, ChevronRight,
   Clock3, Download, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
-  Moon, Plus, QrCode, RefreshCw, Settings, ShieldCheck, Sun, Tags, Trash2, Upload, UserPlus, Users, Wallet, X,
+  Moon, Pencil, Plus, QrCode, RefreshCw, Search, Settings, ShieldCheck, Sun, Tags, Trash2, Upload, UserPlus, Users, Wallet, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -112,6 +112,7 @@ export default function Page() {
   const [view, setView] = useState<View>("beranda");
   const [records, setRecords] = useState<DataRecord[]>([]);
   const [form, setForm] = useState<Kind | null>(null);
+  const [editing, setEditing] = useState<DataRecord | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
   const [donateOpen, setDonateOpen] = useState(false);
   const [supporterOpen, setSupporterOpen] = useState(false);
@@ -234,9 +235,17 @@ export default function Page() {
     });
     setForm(null);
   }
+  async function update(record: DataRecord, data: SaveRecord) {
+    if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
+    await setDoc(doc(db, paths[record.kind], record.id), { ...data, updatedAt: serverTimestamp(), updatedBy: user.uid }, { merge: true });
+    setForm(null); setEditing(null);
+  }
   async function remove(record: DataRecord) {
     if (!admin || !confirm("Hapus data ini?")) return;
     await deleteDoc(doc(db, paths[record.kind], record.id));
+  }
+  function editStart(record: DataRecord) {
+    setEditing(record); setForm(record.kind);
   }
   async function registerSupporter(data: SupporterEntry) {
     await addDoc(collection(db, "supporters"), {
@@ -315,7 +324,7 @@ export default function Page() {
           : view === "keuangan" && admin ? <Finance records={records} add={() => setForm("transaction")} remove={remove} />
           : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} remove={remove} />
-          : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} remove={remove} />
+          : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} edit={editStart} remove={remove} />
           : view === "master" && admin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
           : view === "menu" && admin && user ? <AdminMenu go={setView} logout={logout} />
@@ -323,7 +332,7 @@ export default function Page() {
       </div>
     </main>
     <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
-    {form && <EntryForm kind={form} close={() => setForm(null)} save={save} financeCategories={financeCategories} memberCategories={memberCategories} />}
+    {form && <EntryForm kind={form} editing={editing} close={() => { setForm(null); setEditing(null); }} save={save} update={update} financeCategories={financeCategories} memberCategories={memberCategories} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
     {donateOpen && <DonationModal close={() => setDonateOpen(false)} donationSettings={donationSettings} />}
     {supporterOpen && <SupporterModal close={() => setSupporterOpen(false)} register={registerSupporter} />}
@@ -389,8 +398,10 @@ function usePrayerTimes() {
   const [locating, setLocating] = useState(false);
   const [gpsError, setGpsError] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const lastCoords = useRef<{ lat: number; lon: number } | undefined>(undefined);
 
   async function load(coords?: { lat: number; lon: number }) {
+    lastCoords.current = coords;
     setLoading(true); setFailed(false);
     try {
       const result = await fetchPrayerSchedule(coords);
@@ -425,6 +436,11 @@ function usePrayerTimes() {
     });
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    if (!failed) return;
+    const timer = window.setInterval(() => { void load(lastCoords.current); }, 45000);
+    return () => window.clearInterval(timer);
+  }, [failed]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
 
   const current = jakartaClock.format(new Date(now)).split(":").map(Number);
@@ -481,6 +497,15 @@ function AdminMenu({ go, logout }: { go: (view: View) => void; logout: () => Pro
   return <div className="stack"><Intro eyebrow="MENU PENGURUS" title="Kelola Masjid" description="Fitur administrasi hanya tampil setelah akun pengurus terverifikasi." /><div className="admin-menu">{items.map(([id, title, note, Icon]) => <button key={id} onClick={() => go(id)}><span><Icon /></span><div><strong>{title}</strong><small>{note}</small></div><ChevronRight /></button>)}<button className="logout-menu" onClick={() => void logout()}><span><LogOut /></span><div><strong>Keluar</strong><small>Tutup akses pengurus di perangkat ini</small></div><ChevronRight /></button></div></div>;
 }
 
+function adminErrorMessage(caught: unknown) {
+  const code = caught && typeof caught === "object" && "code" in caught ? String((caught as { code: unknown }).code) : "";
+  if (code === "auth/email-already-in-use") return "Email ini sudah terdaftar sebagai akun di Firebase Authentication. Gunakan email lain, atau jika akun tersebut memang milik pengurus baru, minta developer menautkan UID-nya ke koleksi admins secara manual.";
+  if (code === "auth/invalid-email") return "Format email tidak valid.";
+  if (code === "auth/weak-password") return "Password terlalu lemah, gunakan minimal 6 karakter.";
+  if (code === "auth/network-request-failed") return "Koneksi bermasalah. Periksa internet lalu coba lagi.";
+  if (code === "auth/operation-not-allowed") return "Metode masuk Email/Password belum diaktifkan di Firebase Authentication.";
+  return caught instanceof Error ? caught.message : "Gagal membuat akun pengurus.";
+}
 function SettingsPage({ user, logout, donationSettings, saveDonationSettings, uploadQris, admins, addAdminAccount, toggleAdminActive }: {
   user: User; logout: () => Promise<void>; donationSettings: DonationSettings;
   saveDonationSettings: (data: DonationSettings) => Promise<void>; uploadQris: (file: File) => Promise<string>;
@@ -533,7 +558,7 @@ function SettingsPage({ user, logout, donationSettings, saveDonationSettings, up
       setAdminResult(`Akun pengurus ${newEmail} berhasil dibuat.`);
       setNewEmail(""); setNewPassword("");
     } catch (caught) {
-      setAdminResult(caught instanceof Error ? caught.message : "Gagal membuat akun pengurus.");
+      setAdminResult(adminErrorMessage(caught));
     } finally {
       setAddingAdmin(false);
     }
@@ -690,9 +715,21 @@ function Events({ records, admin, add, remove }: { records: DataRecord[]; admin:
   const items = records.filter((item) => item.kind === "event");
   return <div className="stack"><Intro eyebrow="AGENDA MASJID" title="Hidupkan Masjid, Eratkan Ukhuwah" description="Jadwal ibadah, pendidikan, dan kegiatan sosial untuk seluruh jamaah.">{admin && <Button className="primary" onClick={add}><Plus />Tambah Kegiatan</Button>}</Intro><div className="event-cards">{items.map((item) => <article key={item.id}><span className="date large"><small>{item.date.slice(5, 7) || "BLN"}</small><b>{item.date.slice(8, 10) || "--"}</b></span><div><em>{item.category || "Kegiatan"}</em><h3>{item.title}</h3><p>{item.details}</p></div>{admin && <button onClick={() => remove(item)} aria-label="Hapus kegiatan"><Trash2 /></button>}</article>)}{!items.length && <p className="empty">Belum ada kegiatan yang dipublikasikan.</p>}</div></div>;
 }
-function Members({ records, add, remove }: { records: DataRecord[]; add: () => void; remove: (record: DataRecord) => void }) {
+function Members({ records, add, edit, remove }: { records: DataRecord[]; add: () => void; edit: (record: DataRecord) => void; remove: (record: DataRecord) => void }) {
   const items = records.filter((item) => item.kind === "member");
-  return <div className="stack"><Intro eyebrow="DATABASE JAMAAH" title="Jamaah Masjid Baitul Fadli" description="Data pribadi jamaah hanya dapat dibuka pengurus."><Button className="primary" onClick={add}><Plus />Tambah Jamaah</Button></Intro><div className="stats three"><Stat label="Total Jamaah" value={String(items.length)} note="Data Firestore" icon={<Users />} color="green" /><Stat label="Jamaah Mukim" value={String(items.filter((item) => item.type === "Mukim").length)} note="Berdomisili tetap" icon={<Home />} color="gold" /><Stat label="Non-Mukim" value={String(items.filter((item) => item.type === "Non-Mukim").length)} note="Tidak berdomisili tetap" icon={<Users />} color="blue" /></div><Panel title="Daftar Jamaah" action={items.length + " jamaah"}><div className="members">{items.map((item) => <article key={item.id}><span>{item.title.split(" ").map((word) => word[0]).slice(0, 2).join("")}</span><div><strong>{item.title}</strong><small>{item.phone || "-"} · {item.address || "-"}{item.type && ` · ${item.type}`}{item.category && ` · ${item.category}`}</small></div><button onClick={() => remove(item)} aria-label="Hapus jamaah"><Trash2 /></button></article>)}{!items.length && <p className="empty">Belum ada jamaah.</p>}</div></Panel></div>;
+  const [search, setSearch] = useState(""); const [domisili, setDomisili] = useState(""); const [kategori, setKategori] = useState("");
+  const kategoriOptions = Array.from(new Set(items.map((item) => item.category).filter(Boolean))).sort();
+  const query = search.trim().toLowerCase();
+  const filtered = items.filter((item) =>
+    (!query || item.title.toLowerCase().includes(query) || item.address.toLowerCase().includes(query) || item.phone.toLowerCase().includes(query)) &&
+    (!domisili || item.type === domisili) && (!kategori || item.category === kategori));
+  return <div className="stack"><Intro eyebrow="DATABASE JAMAAH" title="Jamaah Masjid Baitul Fadli" description="Data pribadi jamaah hanya dapat dibuka pengurus."><Button className="primary" onClick={add}><Plus />Tambah Jamaah</Button></Intro><div className="stats three"><Stat label="Total Jamaah" value={String(items.length)} note="Data Firestore" icon={<Users />} color="green" /><Stat label="Jamaah Mukim" value={String(items.filter((item) => item.type === "Mukim").length)} note="Berdomisili tetap" icon={<Home />} color="gold" /><Stat label="Non-Mukim" value={String(items.filter((item) => item.type === "Non-Mukim").length)} note="Tidak berdomisili tetap" icon={<Users />} color="blue" /></div>
+    <div className="finance-toolbar">
+      <label className="field search-field"><Search />Cari nama, alamat, atau nomor<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Ketik untuk mencari..." /></label>
+      <label className="field">Status Domisili<select value={domisili} onChange={(event) => setDomisili(event.target.value)}><option value="">Semua status</option><option>Mukim</option><option>Non-Mukim</option></select></label>
+      <label className="field">Kategori<select value={kategori} onChange={(event) => setKategori(event.target.value)}><option value="">Semua kategori</option>{kategoriOptions.map((value) => <option key={value}>{value}</option>)}</select></label>
+    </div>
+    <Panel title="Daftar Jamaah" action={filtered.length + " dari " + items.length + " jamaah"}><div className="members">{filtered.map((item) => <article key={item.id}><span>{item.title.split(" ").map((word) => word[0]).slice(0, 2).join("")}</span><div><strong>{item.title}</strong><small>{item.phone || "-"} · {item.address || "-"}{item.type && ` · ${item.type}`}{item.category && ` · ${item.category}`}</small></div><button onClick={() => edit(item)} aria-label="Edit jamaah"><Pencil /></button><button onClick={() => remove(item)} aria-label="Hapus jamaah"><Trash2 /></button></article>)}{!filtered.length && <p className="empty">{items.length ? "Tidak ada jamaah yang cocok dengan filter." : "Belum ada jamaah."}</p>}</div></Panel></div>;
 }
 
 function MasterData({ records, financeCategories, memberCategories, addCategory, removeCategory, addStructure, remove }: {
@@ -748,19 +785,23 @@ function CategoryManager({ items, path, withType, add, remove }: {
   </div>;
 }
 
-function EntryForm({ kind, close, save, financeCategories, memberCategories }: { kind: Kind; close: () => void; save: (data: SaveRecord) => Promise<void>; financeCategories: CategoryItem[]; memberCategories: CategoryItem[] }) {
-  const [title, setTitle] = useState(""); const [date, setDate] = useState("");
-  const [amount, setAmount] = useState(0); const [target, setTarget] = useState(0);
-  const [type, setType] = useState(kind === "transaction" ? "Pemasukan" : kind === "member" ? "Mukim" : "");
-  const [category, setCategory] = useState(""); const [details, setDetails] = useState("");
-  const [phone, setPhone] = useState(""); const [address, setAddress] = useState("");
+function EntryForm({ kind, editing, close, save, update, financeCategories, memberCategories }: {
+  kind: Kind; editing: DataRecord | null; close: () => void; save: (data: SaveRecord) => Promise<void>;
+  update: (record: DataRecord, data: SaveRecord) => Promise<void>; financeCategories: CategoryItem[]; memberCategories: CategoryItem[];
+}) {
+  const [title, setTitle] = useState(editing?.title ?? ""); const [date, setDate] = useState(editing?.date ?? "");
+  const [amount, setAmount] = useState(editing?.amount ?? 0); const [target, setTarget] = useState(editing?.target ?? 0);
+  const [type, setType] = useState(editing?.type ?? (kind === "transaction" ? "Pemasukan" : kind === "member" ? "Mukim" : ""));
+  const [category, setCategory] = useState(editing?.category ?? ""); const [details, setDetails] = useState(editing?.details ?? "");
+  const [phone, setPhone] = useState(editing?.phone ?? ""); const [address, setAddress] = useState(editing?.address ?? "");
   const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const labels = { transaction: "Transaksi", program: "Program Donasi", event: "Kegiatan", member: "Jamaah", structure: "Struktur Organisasi" };
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!title) return setError("Nama/judul wajib diisi.");
     setBusy(true); setError("");
-    try { await save({ kind, title, date, amount, type, category, details, target, phone, address }); }
+    const data = { kind, title, date, amount, type, category, details, target, phone, address };
+    try { await (editing ? update(editing, data) : save(data)); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Gagal menyimpan data."); }
     finally { setBusy(false); }
   }
@@ -769,7 +810,7 @@ function EntryForm({ kind, close, save, financeCategories, memberCategories }: {
   const options = kind === "transaction" ? (financeOptions.length ? financeOptions : ["Infak", "Operasional", "Sosial", "Pembangunan"])
     : kind === "program" ? ["Fasilitas", "Sosial", "Operasional"] : kind === "event" ? ["Kajian", "Sosial", "Pendidikan"]
     : kind === "member" ? (memberOptions.length ? memberOptions : ["Jamaah", "Relawan"]) : [];
-  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>Tambah {labels[kind]}</h2><label className="field">{kind === "member" || kind === "structure" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "transaction" && <><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status Domisili<select value={type} onChange={(event) => setType(event.target.value)}><option>Mukim</option><option>Non-Mukim</option></select></label></>}{kind === "structure" && <><label className="field">Jabatan<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Contoh: Ketua Takmir" /></label><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></>}{kind !== "structure" && <label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>}{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : "Simpan Data"}</Button></form></div>;
+  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>{editing ? "Edit" : "Tambah"} {labels[kind]}</h2><label className="field">{kind === "member" || kind === "structure" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "transaction" && <><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status Domisili<select value={type} onChange={(event) => setType(event.target.value)}><option>Mukim</option><option>Non-Mukim</option></select></label></>}{kind === "structure" && <><label className="field">Jabatan<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Contoh: Ketua Takmir" /></label><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></>}{kind !== "structure" && <label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>}{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : editing ? "Simpan Perubahan" : "Simpan Data"}</Button></form></div>;
 }
 function NumberField({ label, value, setValue }: { label: string; value: number; setValue: (value: number) => void }) {
   return <label className="field">{label}<input type="number" min="0" value={value || ""} onChange={(event) => setValue(Number(event.target.value))} /></label>;
