@@ -30,6 +30,7 @@ type SupporterEntry = { name: string; phone: string; address: string; amount: nu
 type CategoryItem = { id: string; name: string; type: string };
 type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string };
 type AdminAccount = { id: string; email: string; active: boolean };
+type PrayerState = ReturnType<typeof usePrayerTimes>;
 type FinanceSummary = {
   income: number; expense: number; balance: number; transactionCount: number;
   openingBalance: number; periodIncome: number; periodExpense: number; period: string;
@@ -125,6 +126,7 @@ export default function Page() {
   const [cashAccounts, setCashAccounts] = useState<CategoryItem[]>([]);
   const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "" });
   const [admins, setAdmins] = useState<AdminAccount[]>([]);
+  const prayer = usePrayerTimes();
   const [error, setError] = useState("");
   const lastLogoTap = useRef(0);
 
@@ -277,10 +279,28 @@ export default function Page() {
   async function addAdminAccount(email: string, password: string) {
     if (!admin || !user) throw new Error("Silakan masuk sebagai pengurus.");
     const secondaryAuth = getSecondaryAuth();
-    const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-    await setDoc(doc(db, "admins", credential.user.uid), {
-      email, active: true, createdAt: serverTimestamp(), createdBy: user.uid,
-    });
+    let uid: string;
+    try {
+      const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
+      uid = credential.user.uid;
+    } catch (caught) {
+      const code = caught && typeof caught === "object" && "code" in caught ? String((caught as { code: unknown }).code) : "";
+      if (code !== "auth/email-already-in-use") throw caught;
+      try {
+        const credential = await signInWithEmailAndPassword(secondaryAuth, email, password);
+        uid = credential.user.uid;
+      } catch {
+        throw new Error("Email sudah terdaftar di Firebase Authentication dengan password berbeda. Masukkan password yang benar untuk menautkan akun ini sebagai pengurus, atau gunakan email lain.");
+      }
+    }
+    try {
+      await setDoc(doc(db, "admins", uid), {
+        email, active: true, createdAt: serverTimestamp(), createdBy: user.uid,
+      });
+    } catch {
+      await signOut(secondaryAuth);
+      throw new Error("Akun berhasil diverifikasi di Firebase Authentication, tapi gagal disimpan ke daftar pengurus. Firestore Rules kemungkinan belum mengizinkan pengurus menulis ke koleksi admins — minta developer menambahkannya, lalu coba lagi.");
+    }
     await signOut(secondaryAuth);
   }
   async function toggleAdminActive(account: AdminAccount) {
@@ -321,8 +341,8 @@ export default function Page() {
       <header className="clean-header"><button className="mobile-brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button></header>
       <div className="page">
         {error && <p className="data-alert">{error}</p>}
-        {view === "beranda" ? <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} />
-          : view === "shalat" ? <PrayerPage />
+        {view === "beranda" ? <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} prayer={prayer} />
+          : view === "shalat" ? <PrayerPage prayer={prayer} />
           : view === "keuangan" && admin ? <Finance records={records} cashAccounts={cashAccounts} add={() => setForm("transaction")} remove={remove} />
           : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} remove={remove} />
@@ -330,7 +350,7 @@ export default function Page() {
           : view === "master" && admin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
           : view === "menu" && admin && user ? <AdminMenu go={setView} logout={logout} />
-          : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} />}
+          : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} prayer={prayer} />}
       </div>
     </main>
     <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
@@ -341,7 +361,7 @@ export default function Page() {
   </div>;
 }
 
-function Dashboard({ records, finance, admin, go, donate, joinSupporter }: { records: DataRecord[]; finance: FinanceSummary; admin: boolean; go: (view: View) => void; donate: () => void; joinSupporter: () => void }) {
+function Dashboard({ records, finance, admin, go, donate, joinSupporter, prayer }: { records: DataRecord[]; finance: FinanceSummary; admin: boolean; go: (view: View) => void; donate: () => void; joinSupporter: () => void; prayer: PrayerState }) {
   const transactions = records.filter((item) => item.kind === "transaction");
   const programs = records.filter((item) => item.kind === "program");
   const events = records.filter((item) => item.kind === "event");
@@ -349,7 +369,7 @@ function Dashboard({ records, finance, admin, go, donate, joinSupporter }: { rec
   const income = transactions.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
   const expense = transactions.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
   return <>
-    <PrayerHero onOpen={() => go("shalat")} />
+    <PrayerHero onOpen={() => go("shalat")} prayer={prayer} />
     <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><div className="actions"><Button onClick={donate}><HeartHandshake />Dukung Masjid</Button><Button variant="outline" onClick={joinSupporter}><UserPlus />Jadi Donatur Tetap</Button></div></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="100vw" priority /></div></section>
     <div className={admin ? "stats" : "stats public-stats"}>{admin ? <>
       <Stat label="Saldo Kas" value={money(finance.balance)} note={`Diperbarui ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="green" />
@@ -466,16 +486,16 @@ function formatCountdown(value: number) {
   return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
 }
 
-function PrayerHero({ onOpen }: { onOpen: () => void }) {
-  const { schedule, next, countdown, loading, failed, location, useGps, locating } = usePrayerTimes();
+function PrayerHero({ onOpen, prayer }: { onOpen: () => void; prayer: PrayerState }) {
+  const { schedule, next, countdown, loading, failed, location, useGps, locating } = prayer;
   return <section className="prayer-hero">
     <div className="prayer-copy"><button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating} title="Gunakan lokasi GPS saya"><MapPin />{locating ? "Mencari lokasi..." : location}</button><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong><small>Metode Kementerian Agama RI · WIB</small></div>
     <button className="prayer-link" onClick={onOpen}>Lihat jadwal lengkap <ChevronRight /></button>
   </section>;
 }
 
-function PrayerPage() {
-  const { schedule, dateLabel, loading, failed, next, countdown, reload, location, useGps, locating, gpsError } = usePrayerTimes();
+function PrayerPage({ prayer }: { prayer: PrayerState }) {
+  const { schedule, dateLabel, loading, failed, next, countdown, reload, location, useGps, locating, gpsError } = prayer;
   return <div className="stack prayer-page">
     <Intro eyebrow="WAKTU IBADAH" title="Jadwal Shalat Hari Ini" description="Jadwal menggunakan metode Kementerian Agama Republik Indonesia. Sesuaikan lokasi dengan GPS untuk jadwal yang lebih akurat." />
     <div className="finance-toolbar no-print">
@@ -483,7 +503,7 @@ function PrayerPage() {
       <Button variant="outline" disabled={locating} onClick={useGps}><LocateFixed />{locating ? "Mencari..." : "Gunakan Lokasi GPS Saya"}</Button>
     </div>
     {gpsError && <p className="data-alert">{gpsError}</p>}
-    <section className="prayer-focus"><div><span>MENUJU WAKTU SALAT</span><h2>{next && schedule ? `${next.label} · ${schedule[next.key].slice(0, 5)}` : "Memuat jadwal"}</h2><strong>{countdown}</strong><small>{dateLabel || "Waktu Indonesia Barat"}</small></div></section>
+    <section className="prayer-focus"><div><span>MENUJU WAKTU SALAT</span><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong>{countdown}</strong><small>{dateLabel || "Waktu Indonesia Barat"}</small></div></section>
     {failed ? <section className="prayer-error"><Clock3 /><h3>Jadwal belum dapat dimuat</h3><p>Periksa koneksi internet lalu coba kembali.</p><Button variant="outline" onClick={() => void reload()}><RefreshCw />Muat ulang</Button></section> : <div className="prayer-list">{prayerItems.map(({ key, label, icon: Icon }) => <article className={next?.key === key ? "next" : ""} key={key}><span><Icon /></span><div><small>{key === "Sunrise" ? "Matahari terbit" : "Waktu salat"}</small><strong>{label}</strong></div><b>{loading ? "--:--" : schedule?.[key]?.slice(0, 5) ?? "--:--"}</b>{next?.key === key && <em>Berikutnya</em>}</article>)}</div>}
     <p className="prayer-note">Jadwal bersifat panduan. Untuk iqamah dan perubahan kegiatan, ikuti pengumuman resmi takmir Masjid Baitul Fadli.</p>
   </div>;
