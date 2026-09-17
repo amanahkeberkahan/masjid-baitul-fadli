@@ -23,7 +23,7 @@ type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah
 type Kind = "transaction" | "program" | "event" | "member" | "structure";
 type DataRecord = {
   id: string; kind: Kind; title: string; date: string; amount: number; type: string;
-  category: string; details: string; target: number; phone: string; address: string;
+  category: string; details: string; target: number; phone: string; address: string; kas: string;
 };
 type SaveRecord = Omit<DataRecord, "id">;
 type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string };
@@ -104,7 +104,7 @@ function mapRecord(kind: Kind, item: QueryDocumentSnapshot<DocumentData>): DataR
     amount: Number(data.amount ?? 0), type: String(data.type ?? ""),
     category: String(data.category ?? ""), details: String(data.details ?? ""),
     target: Number(data.target ?? 0), phone: String(data.phone ?? ""),
-    address: String(data.address ?? ""),
+    address: String(data.address ?? ""), kas: String(data.kas ?? ""),
   };
 }
 
@@ -122,6 +122,7 @@ export default function Page() {
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary>(historicalFinance);
   const [financeCategories, setFinanceCategories] = useState<CategoryItem[]>([]);
   const [memberCategories, setMemberCategories] = useState<CategoryItem[]>([]);
+  const [cashAccounts, setCashAccounts] = useState<CategoryItem[]>([]);
   const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "" });
   const [admins, setAdmins] = useState<AdminAccount[]>([]);
   const [error, setError] = useState("");
@@ -182,6 +183,7 @@ export default function Page() {
       };
       subscribeCategories("financeCategories", setFinanceCategories);
       subscribeCategories("memberCategories", setMemberCategories);
+      subscribeCategories("cashAccounts", setCashAccounts);
       unsubscribers.push(onSnapshot(collection(db, "admins"), (snapshot) => {
         setAdmins(snapshot.docs.map((item) => ({ id: item.id, email: String(item.data().email ?? ""), active: item.data().active === true })));
       }, () => undefined));
@@ -321,18 +323,18 @@ export default function Page() {
         {error && <p className="data-alert">{error}</p>}
         {view === "beranda" ? <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} />
           : view === "shalat" ? <PrayerPage />
-          : view === "keuangan" && admin ? <Finance records={records} add={() => setForm("transaction")} remove={remove} />
+          : view === "keuangan" && admin ? <Finance records={records} cashAccounts={cashAccounts} add={() => setForm("transaction")} remove={remove} />
           : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} remove={remove} />
           : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} edit={editStart} remove={remove} />
-          : view === "master" && admin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
+          : view === "master" && admin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
           : view === "menu" && admin && user ? <AdminMenu go={setView} logout={logout} />
           : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} />}
       </div>
     </main>
     <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
-    {form && <EntryForm kind={form} editing={editing} close={() => { setForm(null); setEditing(null); }} save={save} update={update} financeCategories={financeCategories} memberCategories={memberCategories} />}
+    {form && <EntryForm kind={form} editing={editing} close={() => { setForm(null); setEditing(null); }} save={save} update={update} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
     {donateOpen && <DonationModal close={() => setDonateOpen(false)} donationSettings={donationSettings} />}
     {supporterOpen && <SupporterModal close={() => setSupporterOpen(false)} register={registerSupporter} />}
@@ -671,40 +673,87 @@ function Intro({ eyebrow, title, description, children }: { eyebrow: string; tit
   return <div className="intro"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{description}</p></div>{children}</div>;
 }
 
-function Finance({ records, add, remove }: { records: DataRecord[]; add: () => void; remove: (record: DataRecord) => void }) {
+function Finance({ records, cashAccounts, add, remove }: { records: DataRecord[]; cashAccounts: CategoryItem[]; add: () => void; remove: (record: DataRecord) => void }) {
   const allItems = records.filter((item) => item.kind === "transaction");
   const months = Array.from(new Set(allItems.map((item) => item.date.slice(0, 7)).filter(Boolean))).sort().reverse();
+  const kasNames = Array.from(new Set([...cashAccounts.map((item) => item.name), ...allItems.map((item) => item.kas).filter(Boolean)]));
   const [month, setMonth] = useState("");
-  const items = month ? allItems.filter((item) => item.date.slice(0, 7) === month) : allItems;
+  const [kas, setKas] = useState("");
+  const items = (month ? allItems.filter((item) => item.date.slice(0, 7) === month) : allItems).filter((item) => !kas || item.kas === kas);
   const income = items.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
   const expense = items.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
   const periodLabel = month ? monthId(month) : "Seluruh periode";
-  const printedLabel = new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" }).format(new Date());
+  const now = new Date();
+  const printedLabel = `${new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" }).format(now)} - ${new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta", hour12: false }).format(now)}`;
+
+  const perKas = kasNames.map((name) => {
+    const kasItems = items.filter((item) => item.kas === name);
+    const kasIncome = kasItems.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
+    const kasExpense = kasItems.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
+    return { name, income: kasIncome, expense: kasExpense, balance: kasIncome - kasExpense, count: kasItems.length };
+  }).filter((row) => row.count > 0);
+
+  let openingBalance = 0;
+  let ledgerRows: Array<DataRecord & { runningBalance: number }> = [];
+  if (kas) {
+    const kasAll = allItems.filter((item) => item.kas === kas).slice().sort((a, b) => a.date.localeCompare(b.date));
+    const periodStart = month ? `${month}-01` : "";
+    openingBalance = periodStart ? kasAll.filter((item) => item.date < periodStart).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
+    let running = openingBalance;
+    ledgerRows = kasAll.filter((item) => !periodStart || item.date >= periodStart).map((item) => {
+      running += item.type === "Pemasukan" ? item.amount : -item.amount;
+      return { ...item, runningBalance: running };
+    });
+  }
+
   return <div className="stack">
-    <div className="print-header"><h1>Laporan Keuangan Masjid Baitul Fadli</h1><p>Periode: {periodLabel} · Dicetak {printedLabel}</p></div>
+    <div className="print-header"><h1>Masjid Baitul Fadli</h1><h2>LAPORAN KAS</h2><p>{month ? `Periode ${periodLabel}` : "Seluruh Periode"}</p></div>
     <div className="no-print">
       <Intro eyebrow="TRANSPARAN & AKUNTABEL" title="Laporan Keuangan Masjid" description="Data keuangan hanya dapat dibuka dan dikelola oleh pengurus."><Button className="primary" onClick={add}><Plus />Catat Transaksi</Button></Intro>
       <div className="finance-toolbar">
         <label className="field">Filter bulan<select value={month} onChange={(event) => setMonth(event.target.value)}><option value="">Semua periode</option>{months.map((value) => <option key={value} value={value}>{monthId(value)}</option>)}</select></label>
+        <label className="field">Kas<select value={kas} onChange={(event) => setKas(event.target.value)}><option value="">Semua kas</option>{kasNames.map((value) => <option key={value}>{value}</option>)}</select></label>
         <Button variant="outline" onClick={() => window.print()}><FileDown />Ekspor PDF</Button>
       </div>
       <div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div>
-      <Panel title="Daftar Transaksi" action={items.length + " transaksi"}><div className="table"><div className="tr th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span>Nominal</span><span /></div>{items.map((item) => <div className="tr" key={item.id}><span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span><span>{item.date || "-"}</span><span><em>{item.category || "-"}</em></span><b className={item.type === "Pemasukan" ? "plus" : "minus"}>{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</b><button onClick={() => remove(item)} aria-label="Hapus transaksi"><Trash2 /></button></div>)}{!items.length && <p className="empty">Belum ada transaksi.</p>}</div></Panel>
+      {!kas && perKas.length > 1 && <Panel title="Saldo per Kas" action={perKas.length + " akun"}><div className="table"><div className="tr th"><span>Kas</span><span>Pemasukan</span><span>Pengeluaran</span><span>Saldo</span><span /></div>{perKas.map((row) => <div className="tr" key={row.name}><span><strong>{row.name}</strong></span><span>{money(row.income)}</span><span>{money(row.expense)}</span><b className={row.balance >= 0 ? "plus" : "minus"}>{money(row.balance)}</b><span /></div>)}</div></Panel>}
+      <Panel title="Daftar Transaksi" action={items.length + " transaksi"}><div className="table"><div className="tr th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span>Nominal</span><span /></div>{items.map((item) => <div className="tr" key={item.id}><span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span><span>{item.date || "-"}</span><span><em>{item.category || "-"}</em>{item.kas && <em className="kas-tag">{item.kas}</em>}</span><b className={item.type === "Pemasukan" ? "plus" : "minus"}>{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</b><button onClick={() => remove(item)} aria-label="Hapus transaksi"><Trash2 /></button></div>)}{!items.length && <p className="empty">Belum ada transaksi.</p>}</div></Panel>
     </div>
-    <table className="print-summary"><tbody>
-      <tr><td>Total Pemasukan</td><td>{money(income)}</td></tr>
-      <tr><td>Total Pengeluaran</td><td>{money(expense)}</td></tr>
-      <tr className="total"><td>Saldo {periodLabel}</td><td>{money(income - expense)}</td></tr>
-    </tbody></table>
-    <table className="print-table">
-      <thead><tr><th>No</th><th>Tanggal</th><th>Uraian</th><th>Kategori</th><th>Jenis</th><th>Nominal</th></tr></thead>
-      <tbody>{items.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td>{item.date || "-"}</td><td>{item.title}</td><td>{item.category || "-"}</td><td>{item.type}</td><td className="num">{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</td></tr>)}
-      {!items.length && <tr><td colSpan={6}>Belum ada transaksi pada periode ini.</td></tr>}</tbody>
-    </table>
+    {kas ? <>
+      <table className="print-summary"><tbody>
+        <tr><td>Saldo Awal</td><td>{money(openingBalance)}</td></tr>
+        <tr><td>Nama Kas</td><td>{kas}</td></tr>
+      </tbody></table>
+      <table className="print-table">
+        <thead><tr><th>No</th><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo Akhir</th></tr></thead>
+        <tbody>
+          <tr><td colSpan={6}>{month ? `Saldo per akhir ${previousMonthId(month)}` : "Saldo Awal"}</td><td className="num">{money(openingBalance)}</td></tr>
+          {ledgerRows.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td>{item.date || "-"}</td><td>{item.category || "-"}</td><td>{item.title}</td><td className="num">{item.type === "Pemasukan" ? money(item.amount) : ""}</td><td className="num">{item.type === "Pengeluaran" ? money(item.amount) : ""}</td><td className="num">{money(item.runningBalance)}</td></tr>)}
+          {!ledgerRows.length && <tr><td colSpan={7}>Belum ada transaksi pada periode ini.</td></tr>}
+          <tr className="total"><td colSpan={4}>Total</td><td className="num">{money(income)}</td><td className="num">{money(expense)}</td><td className="num">{money(openingBalance + income - expense)}</td></tr>
+        </tbody>
+      </table>
+    </> : <>
+      <table className="print-summary"><tbody>
+        <tr><td>Total Pemasukan</td><td>{money(income)}</td></tr>
+        <tr><td>Total Pengeluaran</td><td>{money(expense)}</td></tr>
+        <tr className="total"><td>Saldo {periodLabel}</td><td>{money(income - expense)}</td></tr>
+      </tbody></table>
+      {perKas.length > 1 && <table className="print-summary"><tbody>
+        <tr className="head"><td>Kas</td><td>Saldo</td></tr>
+        {perKas.map((row) => <tr key={row.name}><td>{row.name}</td><td>{money(row.balance)}</td></tr>)}
+      </tbody></table>}
+      <table className="print-table">
+        <thead><tr><th>No</th><th>Tanggal</th><th>Kas</th><th>Kategori</th><th>Uraian</th><th>Jenis</th><th>Nominal</th></tr></thead>
+        <tbody>{items.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td>{item.date || "-"}</td><td>{item.kas || "-"}</td><td>{item.category || "-"}</td><td>{item.title}</td><td>{item.type}</td><td className="num">{item.type === "Pemasukan" ? "+" : "−"}{money(item.amount)}</td></tr>)}
+        {!items.length && <tr><td colSpan={7}>Belum ada transaksi pada periode ini.</td></tr>}</tbody>
+      </table>
+    </>}
     <div className="print-signature">
-      <div><span>Mengetahui,</span><strong>Ketua Takmir</strong><em>Masjid Baitul Fadli</em><i className="sign-line" /><small>( ..................................... )</small></div>
       <div><span>Dibuat oleh,</span><strong>Bendahara</strong><em>Masjid Baitul Fadli</em><i className="sign-line" /><small>( ..................................... )</small></div>
+      <div><span>Mengetahui,</span><strong>Ketua Takmir</strong><em>Masjid Baitul Fadli</em><i className="sign-line" /><small>( ..................................... )</small></div>
     </div>
+    <p className="print-footer">Tercetak pada {printedLabel}</p>
   </div>;
 }
 function Programs({ records, admin, add, donate, remove }: { records: DataRecord[]; admin: boolean; add: () => void; donate: () => void; remove: (record: DataRecord) => void }) {
@@ -732,15 +781,18 @@ function Members({ records, add, edit, remove }: { records: DataRecord[]; add: (
     <Panel title="Daftar Jamaah" action={filtered.length + " dari " + items.length + " jamaah"}><div className="members">{filtered.map((item) => <article key={item.id}><span>{item.title.split(" ").map((word) => word[0]).slice(0, 2).join("")}</span><div><strong>{item.title}</strong><small>{item.phone || "-"} · {item.address || "-"}{item.type && ` · ${item.type}`}{item.category && ` · ${item.category}`}</small></div><button onClick={() => edit(item)} aria-label="Edit jamaah"><Pencil /></button><button onClick={() => remove(item)} aria-label="Hapus jamaah"><Trash2 /></button></article>)}{!filtered.length && <p className="empty">{items.length ? "Tidak ada jamaah yang cocok dengan filter." : "Belum ada jamaah."}</p>}</div></Panel></div>;
 }
 
-function MasterData({ records, financeCategories, memberCategories, addCategory, removeCategory, addStructure, remove }: {
-  records: DataRecord[]; financeCategories: CategoryItem[]; memberCategories: CategoryItem[];
+function MasterData({ records, financeCategories, memberCategories, cashAccounts, addCategory, removeCategory, addStructure, remove }: {
+  records: DataRecord[]; financeCategories: CategoryItem[]; memberCategories: CategoryItem[]; cashAccounts: CategoryItem[];
   addCategory: (path: string, name: string, type: string) => Promise<void>;
   removeCategory: (path: string, id: string) => Promise<void>;
   addStructure: () => void; remove: (record: DataRecord) => void;
 }) {
   const structure = records.filter((item) => item.kind === "structure");
   return <div className="stack">
-    <Intro eyebrow="MASTER DATA" title="Kategori & Struktur Organisasi" description="Kelola daftar kategori transaksi, kategori jamaah, dan struktur pengurus masjid." />
+    <Intro eyebrow="MASTER DATA" title="Kategori & Struktur Organisasi" description="Kelola daftar akun kas, kategori transaksi, kategori jamaah, dan struktur pengurus masjid." />
+    <Panel title="Master Kas" action={cashAccounts.length + " akun kas"}>
+      <CategoryManager items={cashAccounts} path="cashAccounts" add={addCategory} remove={removeCategory} placeholder="Contoh: Kas Utama, Kas Pembangunan, Bank BSI" />
+    </Panel>
     <Panel title="Kategori Keuangan" action={financeCategories.length + " kategori"}>
       <CategoryManager items={financeCategories} path="financeCategories" withType add={addCategory} remove={removeCategory} />
     </Panel>
@@ -756,8 +808,8 @@ function MasterData({ records, financeCategories, memberCategories, addCategory,
     </section>
   </div>;
 }
-function CategoryManager({ items, path, withType, add, remove }: {
-  items: CategoryItem[]; path: string; withType?: boolean;
+function CategoryManager({ items, path, withType, placeholder, add, remove }: {
+  items: CategoryItem[]; path: string; withType?: boolean; placeholder?: string;
   add: (path: string, name: string, type: string) => Promise<void>;
   remove: (path: string, id: string) => Promise<void>;
 }) {
@@ -773,7 +825,7 @@ function CategoryManager({ items, path, withType, add, remove }: {
   }
   return <div className="category-manager">
     <form className="category-form" onSubmit={submit}>
-      <input placeholder="Nama kategori" value={name} onChange={(event) => setName(event.target.value)} />
+      <input placeholder={placeholder ?? "Nama kategori"} value={name} onChange={(event) => setName(event.target.value)} />
       {withType && <select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select>}
       <Button disabled={busy || !name.trim()}><Plus />Tambah</Button>
     </form>
@@ -785,22 +837,24 @@ function CategoryManager({ items, path, withType, add, remove }: {
   </div>;
 }
 
-function EntryForm({ kind, editing, close, save, update, financeCategories, memberCategories }: {
+function EntryForm({ kind, editing, close, save, update, financeCategories, memberCategories, cashAccounts }: {
   kind: Kind; editing: DataRecord | null; close: () => void; save: (data: SaveRecord) => Promise<void>;
-  update: (record: DataRecord, data: SaveRecord) => Promise<void>; financeCategories: CategoryItem[]; memberCategories: CategoryItem[];
+  update: (record: DataRecord, data: SaveRecord) => Promise<void>; financeCategories: CategoryItem[]; memberCategories: CategoryItem[]; cashAccounts: CategoryItem[];
 }) {
   const [title, setTitle] = useState(editing?.title ?? ""); const [date, setDate] = useState(editing?.date ?? "");
   const [amount, setAmount] = useState(editing?.amount ?? 0); const [target, setTarget] = useState(editing?.target ?? 0);
   const [type, setType] = useState(editing?.type ?? (kind === "transaction" ? "Pemasukan" : kind === "member" ? "Mukim" : ""));
   const [category, setCategory] = useState(editing?.category ?? ""); const [details, setDetails] = useState(editing?.details ?? "");
   const [phone, setPhone] = useState(editing?.phone ?? ""); const [address, setAddress] = useState(editing?.address ?? "");
+  const cashOptions = cashAccounts.map((item) => item.name);
+  const [kas, setKas] = useState(editing?.kas ?? cashOptions[0] ?? "");
   const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const labels = { transaction: "Transaksi", program: "Program Donasi", event: "Kegiatan", member: "Jamaah", structure: "Struktur Organisasi" };
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!title) return setError("Nama/judul wajib diisi.");
     setBusy(true); setError("");
-    const data = { kind, title, date, amount, type, category, details, target, phone, address };
+    const data = { kind, title, date, amount, type, category, details, target, phone, address, kas };
     try { await (editing ? update(editing, data) : save(data)); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Gagal menyimpan data."); }
     finally { setBusy(false); }
@@ -810,7 +864,7 @@ function EntryForm({ kind, editing, close, save, update, financeCategories, memb
   const options = kind === "transaction" ? (financeOptions.length ? financeOptions : ["Infak", "Operasional", "Sosial", "Pembangunan"])
     : kind === "program" ? ["Fasilitas", "Sosial", "Operasional"] : kind === "event" ? ["Kajian", "Sosial", "Pendidikan"]
     : kind === "member" ? (memberOptions.length ? memberOptions : ["Jamaah", "Relawan"]) : [];
-  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>{editing ? "Edit" : "Tambah"} {labels[kind]}</h2><label className="field">{kind === "member" || kind === "structure" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "transaction" && <><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status Domisili<select value={type} onChange={(event) => setType(event.target.value)}><option>Mukim</option><option>Non-Mukim</option></select></label></>}{kind === "structure" && <><label className="field">Jabatan<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Contoh: Ketua Takmir" /></label><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></>}{kind !== "structure" && <label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>}{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : editing ? "Simpan Perubahan" : "Simpan Data"}</Button></form></div>;
+  return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>{editing ? "Edit" : "Tambah"} {labels[kind]}</h2><label className="field">{kind === "member" || kind === "structure" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "transaction" && <><label className="field">Kas<select value={kas} onChange={(event) => setKas(event.target.value)}><option value="">Pilih kas</option>{cashOptions.map((option) => <option key={option}>{option}</option>)}</select></label><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status Domisili<select value={type} onChange={(event) => setType(event.target.value)}><option>Mukim</option><option>Non-Mukim</option></select></label></>}{kind === "structure" && <><label className="field">Jabatan<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Contoh: Ketua Takmir" /></label><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></>}{kind !== "structure" && <label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>}{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : editing ? "Simpan Perubahan" : "Simpan Data"}</Button></form></div>;
 }
 function NumberField({ label, value, setValue }: { label: string; value: number; setValue: (value: number) => void }) {
   return <label className="field">{label}<input type="number" min="0" value={value || ""} onChange={(event) => setValue(Number(event.target.value))} /></label>;
