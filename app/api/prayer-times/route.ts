@@ -8,6 +8,23 @@ function jakartaDate() {
   return `${value.day}-${value.month}-${value.year}`;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function fetchWithRetry(endpoint: string, attempts = 3) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const response = await fetch(endpoint, { next: { revalidate: 21600 }, signal: AbortSignal.timeout(8000) });
+      if (!response.ok) throw new Error(`Prayer API request failed (${response.status})`);
+      return response;
+    } catch (caught) {
+      lastError = caught;
+      if (attempt < attempts - 1) await sleep(400 * (attempt + 1));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Prayer API request failed");
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -19,8 +36,7 @@ export async function GET(request: Request) {
     const endpoint = useGps
       ? `https://api.aladhan.com/v1/timings/${date}?latitude=${lat}&longitude=${lon}&method=20`
       : `https://api.aladhan.com/v1/timingsByCity/${date}?city=Surabaya&country=Indonesia&method=20`;
-    const response = await fetch(endpoint, { next: { revalidate: 21600 } });
-    if (!response.ok) throw new Error("Prayer API request failed");
+    const response = await fetchWithRetry(endpoint);
     const payload = await response.json() as {
       code: number;
       data: { timings: Record<string, string>; date: { readable: string; hijri: { date: string; month: { en: string } } } };
