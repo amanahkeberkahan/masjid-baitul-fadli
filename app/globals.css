@@ -100,5 +100,16 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
 
 .admin-list{display:grid;gap:0;margin:16px 0}.admin-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:10px 4px;border-top:1px solid #edf1ef}.admin-row:first-child{border-top:0}.admin-row>span{width:36px;height:36px;border-radius:10px;display:grid;place-items:center}.admin-row>span svg{width:16px}.admin-row>span.on{background:#e6f5fa;color:#147fa8}.admin-row>span.off{background:#f2f2f2;color:#8b9893}.admin-row strong,.admin-row small{display:block}.admin-row small{color:#84918c;font-size:11px;margin-top:2px}
 .admin-accounts .account-form{margin-top:6px;padding-top:14px;border-top:1px dashed #e1e9e5}
+@media(max-width:800px){
+.tr.ledger-row:not(.th){display:flex;flex-direction:column;gap:3px;position:relative;padding-right:56px}
+.tr.ledger-row>span:first-child{font-weight:700;display:flex;align-items:center;gap:8px}
+.tr.ledger-row>span:nth-child(2){color:#7b8a84;font-size:11px}
+.tr.ledger-row>span:nth-child(3){display:flex;flex-wrap:wrap;gap:6px}
+.tr.ledger-row>b.num{text-align:left;font-size:13px}
+.tr.ledger-row>b.num.plus:not(:empty)::before{content:"Uang Masuk: ";font-weight:400;color:#7b8a84}
+.tr.ledger-row>b.num.minus:not(:empty)::before{content:"Uang Keluar: ";font-weight:400;color:#7b8a84}
+.tr.ledger-row>b.num:not(.plus):not(.minus)::before{content:"Saldo: ";font-weight:400;color:#7b8a84}
+.tr.ledger-row .row-actions{position:absolute;top:14px;right:14px}
+}
 
 .search-field{flex:1.6;min-width:220px}.search-field>svg{display:none}.finance-toolbar label.search-field{position:relative}.finance-toolbar label.search-field input{padding-left:34px}.finance-toolbar label.search-field svg{display:block;position:absolute;left:11px;top:37px;width:15px;height:15px;color:#8b9993;pointer-events:none}
