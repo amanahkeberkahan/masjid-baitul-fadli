@@ -1,9 +1,10 @@
+import { put } from "@vercel/blob";
+
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 
 export async function POST(request: Request) {
-  const apiKey = process.env.IMGBB_API_KEY;
-  if (!apiKey) {
-    return Response.json({ error: "Layanan unggah gambar belum dikonfigurasi (IMGBB_API_KEY belum diisi)." }, { status: 503 });
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    return Response.json({ error: "Layanan unggah gambar belum dikonfigurasi (Vercel Blob belum tersambung ke project ini)." }, { status: 503 });
   }
 
   const incoming = await request.formData();
@@ -18,18 +19,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "Ukuran gambar maksimal 8MB." }, { status: 400 });
   }
 
-  const outgoing = new FormData();
-  outgoing.append("image", file);
-
   try {
-    const response = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
-      method: "POST",
-      body: outgoing,
-      signal: AbortSignal.timeout(20000),
+    const blob = await put(`uploads/${Date.now()}-${file.name}`, file, {
+      access: "public",
+      addRandomSuffix: true,
     });
-    const payload = await response.json() as { success?: boolean; data?: { url?: string } };
-    if (!response.ok || !payload.success || !payload.data?.url) throw new Error("ImgBB upload failed");
-    return Response.json({ url: payload.data.url });
+    return Response.json({ url: blob.url });
   } catch {
     return Response.json({ error: "Gagal mengunggah gambar. Coba lagi." }, { status: 502 });
   }
