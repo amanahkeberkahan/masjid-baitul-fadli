@@ -8,7 +8,6 @@ import {
   addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query,
   serverTimestamp, setDoc, writeBatch, type DocumentData, type QueryDocumentSnapshot, type Unsubscribe,
 } from "firebase/firestore";
-import { getDownloadURL, ref as storageRef, uploadBytes } from "firebase/storage";
 import {
   ArrowDownLeft, ArrowUpRight, Building2, CalendarDays, CheckCircle2, ChevronRight,
   Clock3, Download, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
@@ -16,7 +15,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { auth, db, getSecondaryAuth, storage } from "@/lib/firebase";
+import { auth, db, getSecondaryAuth } from "@/lib/firebase";
 import historicalTransactions from "@/data/finance-history.json";
 
 type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "master" | "pengaturan" | "menu";
@@ -286,19 +285,23 @@ export default function Page() {
     if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
     await setDoc(doc(db, "settings", "donation"), { ...data, updatedAt: serverTimestamp() }, { merge: true });
   }
+  async function uploadImage(file: File) {
+    const body = new FormData();
+    body.append("file", file);
+    const response = await fetch("/api/upload-image", { method: "POST", body });
+    const payload = await response.json() as { url?: string; error?: string };
+    if (!response.ok || !payload.url) throw new Error(payload.error || "Gagal mengunggah gambar.");
+    return payload.url;
+  }
   async function uploadQris(file: File) {
-    if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
-    const fileRef = storageRef(storage, "qris/donasi-masjid-baitul-fadli.png");
-    await uploadBytes(fileRef, file);
-    const url = await getDownloadURL(fileRef);
+    if (!isFullAdmin) throw new Error("Silakan masuk sebagai pengurus.");
+    const url = await uploadImage(file);
     await setDoc(doc(db, "settings", "donation"), { qrisUrl: url, updatedAt: serverTimestamp() }, { merge: true });
     return url;
   }
   async function uploadEventPoster(file: File) {
     if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
-    const fileRef = storageRef(storage, `events/${Date.now()}-${file.name}`);
-    await uploadBytes(fileRef, file);
-    return getDownloadURL(fileRef);
+    return uploadImage(file);
   }
   async function addAdminAccount(email: string, password: string, role: string) {
     if (!isFullAdmin || !user) throw new Error("Hanya pengurus penuh yang dapat menambah akun.");
