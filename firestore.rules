@@ -1,0 +1,97 @@
+rules_version = '2';
+
+// Firestore Security Rules — Masjid Baitul Fadli
+// PENTING: file ini adalah sumber referensi di repo. Firebase TIDAK membaca
+// file ini secara otomatis (tidak ada pipeline deploy rules di repo ini).
+// Setiap perubahan di sini WAJIB disalin manual ke:
+// Firebase Console -> Firestore Database -> Rules -> Publish
+// (project: masjid-baitul-fadli)
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function adminDoc() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Pengurus aktif (peran "pengurus" ATAU "staff") — boleh masuk & membaca datanya sendiri.
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+        && adminDoc().data.active == true;
+    }
+
+    // Pengurus penuh saja (bukan staff agenda) — akses ke keuangan, jamaah, master data,
+    // pengaturan donasi, dan kelola akun pengurus lain.
+    function isFullAdmin() {
+      return isAdmin() && adminDoc().data.role != "staff";
+    }
+
+    match /admins/{userId} {
+      allow read: if signedIn() && (request.auth.uid == userId || isAdmin());
+      allow write: if isFullAdmin();
+    }
+
+    match /publicStats/{documentId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /transactions/{documentId} {
+      allow read, write: if isFullAdmin();
+    }
+
+    match /members/{documentId} {
+      allow read, write: if isFullAdmin();
+    }
+
+    match /programs/{documentId} {
+      allow read: if true;
+      allow write: if isFullAdmin();
+    }
+
+    // Kegiatan/agenda: dibaca publik, ditulis oleh pengurus penuh MAUPUN staff agenda.
+    match /events/{documentId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /orgStructure/{documentId} {
+      allow read, write: if isFullAdmin();
+    }
+
+    match /financeCategories/{documentId} {
+      allow read, write: if isFullAdmin();
+    }
+
+    match /memberCategories/{documentId} {
+      allow read, write: if isFullAdmin();
+    }
+
+    match /cashAccounts/{documentId} {
+      allow read, write: if isFullAdmin();
+    }
+
+    // Info rekening & QRIS donasi: dibaca publik di halaman donasi, hanya
+    // pengurus penuh yang boleh mengubah.
+    match /settings/{documentId} {
+      allow read: if true;
+      allow write: if isFullAdmin();
+    }
+
+    // Form "Jadi Donatur Tetap": siapapun (tanpa login) boleh mengirim data
+    // pendaftaran baru, tapi tidak boleh membaca/mengubah/menghapus data
+    // pendaftar lain. Hanya pengurus penuh yang boleh membaca/mengelola.
+    match /supporters/{documentId} {
+      allow create: if true;
+      allow read, update, delete: if isFullAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
