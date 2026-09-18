@@ -33,9 +33,11 @@ export async function GET(request: Request) {
     const useGps = Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
 
     const date = jakartaDate();
+    // Kriteria Muhammadiyah (Hisab Hakiki Wujudul Hilal): sudut Subuh -20°, Isya -18°.
+    const methodParams = "method=99&methodSettings=20,0,18";
     const endpoint = useGps
-      ? `https://api.aladhan.com/v1/timings/${date}?latitude=${lat}&longitude=${lon}&method=20`
-      : `https://api.aladhan.com/v1/timingsByCity/${date}?city=Surabaya&country=Indonesia&method=20`;
+      ? `https://api.aladhan.com/v1/timings/${date}?latitude=${lat}&longitude=${lon}&${methodParams}`
+      : `https://api.aladhan.com/v1/timingsByCity/${date}?city=Surabaya&country=Indonesia&${methodParams}`;
     const response = await fetchWithRetry(endpoint);
     const payload = await response.json() as {
       code: number;
@@ -48,7 +50,7 @@ export async function GET(request: Request) {
       timings,
       dateLabel: `${payload.data.date.readable} · ${payload.data.date.hijri.date} ${payload.data.date.hijri.month.en}`,
       location: useGps ? `Lokasi Anda (${lat.toFixed(3)}, ${lon.toFixed(3)})` : "Gunung Anyar, Surabaya",
-      method: "Kementerian Agama Republik Indonesia",
+      method: "Muhammadiyah (Hisab Hakiki Wujudul Hilal)",
     }, { headers: { "Cache-Control": useGps ? "no-store" : "public, s-maxage=21600, stale-while-revalidate=86400" } });
   } catch {
     return Response.json({ error: "Jadwal salat belum tersedia." }, { status: 503 });
