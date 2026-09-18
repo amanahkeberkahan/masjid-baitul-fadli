@@ -1,0 +1,54 @@
+rules_version = '2';
+
+// Firebase Storage Security Rules — Masjid Baitul Fadli
+// PENTING: file ini adalah sumber referensi di repo. Firebase Storage TIDAK
+// membaca file ini secara otomatis (tidak ada pipeline deploy rules di
+// repo ini). Setiap perubahan di sini WAJIB disalin manual ke:
+// Firebase Console -> Storage -> Rules -> Publish
+// (project: masjid-baitul-fadli)
+//
+// Terpisah dari firestore.rules — Firestore Rules TIDAK mengatur akses
+// Storage (upload gambar/file). Storage punya rules sendiri, dan defaultnya
+// menolak semua akses sampai diatur eksplisit seperti di bawah ini.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function adminData() {
+      return firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    // Pengurus aktif (peran "pengurus" ATAU "staff").
+    function isAdmin() {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid))
+        && adminData().active == true;
+    }
+
+    // Pengurus penuh saja (bukan staff agenda).
+    function isFullAdmin() {
+      return isAdmin() && adminData().role != "staff";
+    }
+
+    // Poster kegiatan/agenda: dibaca publik, diunggah oleh pengurus penuh
+    // MAUPUN staff agenda (selaras dengan hak akses koleksi events).
+    match /events/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // QRIS donasi masjid: dibaca publik, hanya pengurus penuh yang boleh
+    // mengganti.
+    match /qris/{fileName} {
+      allow read: if true;
+      allow write: if isFullAdmin();
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
