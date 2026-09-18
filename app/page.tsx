@@ -731,6 +731,31 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
       return [...rows, { ...item, runningBalance }];
     }, []);
 
+  function exportExcel() {
+    const escapeCell = (value: string | number) => {
+      const text = String(value);
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const header = ["No", "Tanggal", "Kategori", "Keterangan", "Kas", "Uang Masuk", "Uang Keluar", "Saldo"];
+    const rows: Array<(string | number)[]> = [
+      ["", "", month ? `Saldo per akhir ${previousMonthId(month)}` : "Saldo Awal", "", "", "", "", openingBalance],
+      ...ledgerRows.map((item, index) => [
+        index + 1, item.date || "-", item.category || "-", item.title, item.kas || "-",
+        item.type === "Pemasukan" ? item.amount : "", item.type === "Pengeluaran" ? item.amount : "", item.runningBalance,
+      ]),
+      ["", "", "Total", "", "", income, expense, openingBalance + income - expense],
+    ];
+    const csvContent = "\uFEFF" + [header, ...rows].map((row) => row.map(escapeCell).join(",")).join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const fileLabel = (month ? monthId(month) : "Seluruh-Periode") + (kas ? `-${kas}` : "");
+    link.href = url;
+    link.download = `Laporan-Kas-Masjid-Baitul-Fadli-${fileLabel}.csv`.replace(/\s+/g, "-");
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return <div className="stack">
     <div className="print-header"><h1>Masjid Baitul Fadli</h1><h2>LAPORAN KAS</h2><p>{month ? `Periode ${periodLabel}` : "Seluruh Periode"}</p></div>
     <div className="no-print">
@@ -739,6 +764,7 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
         <label className="field">Filter bulan<select value={month} onChange={(event) => setMonth(event.target.value)}><option value="">Semua periode</option>{months.map((value) => <option key={value} value={value}>{monthId(value)}</option>)}</select></label>
         <label className="field">Kas<select value={kas} onChange={(event) => setKas(event.target.value)}><option value="">Semua kas</option>{kasNames.map((value) => <option key={value}>{value}</option>)}</select></label>
         <Button variant="outline" onClick={() => window.print()}><FileDown />Ekspor PDF</Button>
+        <Button variant="outline" onClick={exportExcel}><Download />Ekspor Excel</Button>
       </div>
       <div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div>
       {!kas && perKas.length > 1 && <Panel title="Saldo per Kas" action={perKas.length + " akun"}><div className="table"><div className="tr th"><span>Kas</span><span>Pemasukan</span><span>Pengeluaran</span><span>Saldo</span><span /></div>{perKas.map((row) => <div className="tr" key={row.name}><span><strong>{row.name}</strong></span><span>{money(row.income)}</span><span>{money(row.expense)}</span><b className={row.balance >= 0 ? "plus" : "minus"}>{money(row.balance)}</b><span /></div>)}</div></Panel>}
