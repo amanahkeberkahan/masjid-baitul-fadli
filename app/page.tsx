@@ -29,7 +29,7 @@ type SaveRecord = Omit<DataRecord, "id">;
 type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string };
 type CategoryItem = { id: string; name: string; type: string };
 type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string };
-type AdminAccount = { id: string; email: string; active: boolean };
+type AdminAccount = { id: string; email: string; active: boolean; role: string };
 type PrayerState = ReturnType<typeof usePrayerTimes>;
 type FinanceSummary = {
   income: number; expense: number; balance: number; transactionCount: number;
@@ -126,6 +126,7 @@ export default function Page() {
   const [supporterOpen, setSupporterOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [admin, setAdmin] = useState(false);
+  const [role, setRole] = useState("pengurus");
   const [authReady, setAuthReady] = useState(false);
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary>(historicalFinance);
   const [financeCategories, setFinanceCategories] = useState<CategoryItem[]>([]);
@@ -136,17 +137,21 @@ export default function Page() {
   const prayer = usePrayerTimes();
   const [error, setError] = useState("");
   const lastLogoTap = useRef(0);
+  const isFullAdmin = admin && role !== "staff";
 
   useEffect(() => onAuthStateChanged(auth, async (currentUser) => {
     setUser(currentUser);
     setAdmin(false);
+    setRole("pengurus");
     if (!currentUser) {
       setRecords((current) => current.filter((item) => item.kind === "program" || item.kind === "event"));
     }
     if (currentUser) {
       try {
         const status = await getDoc(doc(db, "admins", currentUser.uid));
-        setAdmin(status.exists() && status.data().active === true);
+        const active = status.exists() && status.data().active === true;
+        setAdmin(active);
+        setRole(active ? String(status.data()?.role ?? "pengurus") : "pengurus");
       } catch {
         setError("Status pengurus tidak dapat diverifikasi.");
       }
@@ -177,7 +182,7 @@ export default function Page() {
     };
     subscribe("program");
     subscribe("event");
-    if (admin) {
+    if (isFullAdmin) {
       subscribe("transaction");
       subscribe("member");
       subscribe("structure");
@@ -194,11 +199,14 @@ export default function Page() {
       subscribeCategories("memberCategories", setMemberCategories);
       subscribeCategories("cashAccounts", setCashAccounts);
       unsubscribers.push(onSnapshot(collection(db, "admins"), (snapshot) => {
-        setAdmins(snapshot.docs.map((item) => ({ id: item.id, email: String(item.data().email ?? ""), active: item.data().active === true })));
+        setAdmins(snapshot.docs.map((item) => ({
+          id: item.id, email: String(item.data().email ?? ""), active: item.data().active === true,
+          role: String(item.data().role ?? "pengurus"),
+        })));
       }, () => undefined));
     }
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [admin]);
+  }, [isFullAdmin]);
 
   useEffect(() => onSnapshot(doc(db, "settings", "donation"), (snapshot) => {
     if (!snapshot.exists()) return;
@@ -241,6 +249,7 @@ export default function Page() {
   }
   async function save(data: SaveRecord) {
     if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
+    if (!isFullAdmin && data.kind !== "event") throw new Error("Staff agenda hanya dapat mengelola data kegiatan.");
     await addDoc(collection(db, paths[data.kind]), {
       ...data, createdAt: serverTimestamp(), createdBy: user.uid,
     });
@@ -248,11 +257,13 @@ export default function Page() {
   }
   async function update(record: DataRecord, data: SaveRecord) {
     if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
+    if (!isFullAdmin && record.kind !== "event") throw new Error("Staff agenda hanya dapat mengelola data kegiatan.");
     await setDoc(doc(db, paths[record.kind], record.id), { ...data, updatedAt: serverTimestamp(), updatedBy: user.uid }, { merge: true });
     setForm(null); setEditing(null);
   }
   async function remove(record: DataRecord) {
     if (!admin || !confirm("Hapus data ini?")) return;
+    if (!isFullAdmin && record.kind !== "event") return;
     await deleteDoc(doc(db, paths[record.kind], record.id));
   }
   function editStart(record: DataRecord) {
@@ -289,8 +300,8 @@ export default function Page() {
     await uploadBytes(fileRef, file);
     return getDownloadURL(fileRef);
   }
-  async function addAdminAccount(email: string, password: string) {
-    if (!admin || !user) throw new Error("Silakan masuk sebagai pengurus.");
+  async function addAdminAccount(email: string, password: string, role: string) {
+    if (!isFullAdmin || !user) throw new Error("Hanya pengurus penuh yang dapat menambah akun.");
     const secondaryAuth = getSecondaryAuth();
     let uid: string;
     try {
@@ -308,7 +319,7 @@ export default function Page() {
     }
     try {
       await setDoc(doc(db, "admins", uid), {
-        email, active: true, createdAt: serverTimestamp(), createdBy: user.uid,
+        email, active: true, role, createdAt: serverTimestamp(), createdBy: user.uid,
       });
     } catch {
       await signOut(secondaryAuth);
@@ -317,7 +328,7 @@ export default function Page() {
     await signOut(secondaryAuth);
   }
   async function toggleAdminActive(account: AdminAccount) {
-    if (!admin) return;
+    if (!isFullAdmin) return;
     if (account.id === user?.uid && account.active) {
       if (!confirm("Ini akun Anda sendiri. Nonaktifkan akses pengurus untuk akun ini?")) return;
     }
@@ -335,35 +346,41 @@ export default function Page() {
     }
   }
 
-  const nav = admin ? [...publicNav, ...privateNav] : publicNav;
-  const mobileNav = admin ? [
+  const nav = admin ? [...publicNav, ...(isFullAdmin ? privateNav : [])] : publicNav;
+  const mobileNav = admin ? (isFullAdmin ? [
     ["beranda", "Beranda", Home],
     ["shalat", "Shalat", Clock3],
     ["keuangan", "Keuangan", Wallet],
     ["program", "Donasi", HeartHandshake],
     ["menu", "Menu", LayoutGrid],
-  ] as const : publicNav;
+  ] as const : [
+    ["beranda", "Beranda", Home],
+    ["shalat", "Shalat", Clock3],
+    ["kegiatan", "Kegiatan", CalendarDays],
+    ["program", "Donasi", HeartHandshake],
+    ["pengaturan", "Akun", Settings],
+  ] as const) : publicNav;
   return <div className="shell">
     <aside className="sidebar">
       <button className="brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button>
       <p className="caption">MENU UTAMA</p>
       <nav>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon />{label}</button>)}</nav>
-      <div className="sidebar-foot">{admin && <button className={view === "pengaturan" ? "active" : ""} onClick={() => setView("pengaturan")}><Settings />Pengaturan</button>}<section><ShieldCheck /><strong>{admin ? "Mode pengurus aktif" : "Data masjid aman"}</strong><small>{admin ? "Anda dapat mengelola data masjid." : "Informasi publik dapat dibuka tanpa akun."}</small></section></div>
+      <div className="sidebar-foot">{admin && <button className={view === "pengaturan" ? "active" : ""} onClick={() => setView("pengaturan")}><Settings />Pengaturan</button>}<section><ShieldCheck /><strong>{admin ? (isFullAdmin ? "Mode pengurus aktif" : "Mode staff agenda") : "Data masjid aman"}</strong><small>{admin ? (isFullAdmin ? "Anda dapat mengelola data masjid." : "Anda dapat mengelola agenda kegiatan.") : "Informasi publik dapat dibuka tanpa akun."}</small></section></div>
     </aside>
     <main>
       <header className="clean-header"><button className="mobile-brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button></header>
       <div className="page">
         {error && <p className="data-alert">{error}</p>}
-        {view === "beranda" ? <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} prayer={prayer} />
+        {view === "beranda" ? <Dashboard records={records} finance={financeSummary} admin={isFullAdmin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} prayer={prayer} />
           : view === "shalat" ? <PrayerPage prayer={prayer} />
-          : view === "keuangan" && admin ? <Finance records={records} cashAccounts={cashAccounts} add={() => setForm("transaction")} edit={editStart} remove={remove} />
-          : view === "program" ? <Programs records={records} admin={admin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
+          : view === "keuangan" && isFullAdmin ? <Finance records={records} cashAccounts={cashAccounts} add={() => setForm("transaction")} edit={editStart} remove={remove} />
+          : view === "program" ? <Programs records={records} admin={isFullAdmin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} edit={editStart} remove={remove} />
-          : view === "jamaah" && admin ? <Members records={records} add={() => setForm("member")} edit={editStart} remove={remove} />
-          : view === "master" && admin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
-          : view === "pengaturan" && admin && user ? <SettingsPage user={user} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
-          : view === "menu" && admin && user ? <AdminMenu go={setView} logout={logout} />
-          : <Dashboard records={records} finance={financeSummary} admin={admin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} prayer={prayer} />}
+          : view === "jamaah" && isFullAdmin ? <Members records={records} add={() => setForm("member")} edit={editStart} remove={remove} />
+          : view === "master" && isFullAdmin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
+          : view === "pengaturan" && admin && user ? <SettingsPage user={user} isFullAdmin={isFullAdmin} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
+          : view === "menu" && isFullAdmin && user ? <AdminMenu go={setView} logout={logout} />
+          : <Dashboard records={records} finance={financeSummary} admin={isFullAdmin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} prayer={prayer} />}
       </div>
     </main>
     <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
@@ -541,10 +558,10 @@ function adminErrorMessage(caught: unknown) {
   if (code === "auth/operation-not-allowed") return "Metode masuk Email/Password belum diaktifkan di Firebase Authentication.";
   return caught instanceof Error ? caught.message : "Gagal membuat akun pengurus.";
 }
-function SettingsPage({ user, logout, donationSettings, saveDonationSettings, uploadQris, admins, addAdminAccount, toggleAdminActive }: {
-  user: User; logout: () => Promise<void>; donationSettings: DonationSettings;
+function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonationSettings, uploadQris, admins, addAdminAccount, toggleAdminActive }: {
+  user: User; isFullAdmin: boolean; logout: () => Promise<void>; donationSettings: DonationSettings;
   saveDonationSettings: (data: DonationSettings) => Promise<void>; uploadQris: (file: File) => Promise<string>;
-  admins: AdminAccount[]; addAdminAccount: (email: string, password: string) => Promise<void>; toggleAdminActive: (account: AdminAccount) => Promise<void>;
+  admins: AdminAccount[]; addAdminAccount: (email: string, password: string, role: string) => Promise<void>; toggleAdminActive: (account: AdminAccount) => Promise<void>;
 }) {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState("");
@@ -556,6 +573,7 @@ function SettingsPage({ user, logout, donationSettings, saveDonationSettings, up
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState("");
   const [newEmail, setNewEmail] = useState(""); const [newPassword, setNewPassword] = useState("");
+  const [newRole, setNewRole] = useState("pengurus");
   const [addingAdmin, setAddingAdmin] = useState(false); const [adminResult, setAdminResult] = useState("");
 
   async function submitAccount(event: React.FormEvent) {
@@ -589,9 +607,9 @@ function SettingsPage({ user, logout, donationSettings, saveDonationSettings, up
     if (newPassword.length < 6) return setAdminResult("Password minimal 6 karakter.");
     setAddingAdmin(true); setAdminResult("");
     try {
-      await addAdminAccount(newEmail, newPassword);
-      setAdminResult(`Akun pengurus ${newEmail} berhasil dibuat.`);
-      setNewEmail(""); setNewPassword("");
+      await addAdminAccount(newEmail, newPassword, newRole);
+      setAdminResult(`Akun ${newRole === "staff" ? "staff agenda" : "pengurus"} ${newEmail} berhasil dibuat.`);
+      setNewEmail(""); setNewPassword(""); setNewRole("pengurus");
     } catch (caught) {
       setAdminResult(adminErrorMessage(caught));
     } finally {
@@ -637,29 +655,30 @@ function SettingsPage({ user, logout, donationSettings, saveDonationSettings, up
   return <div className="stack">
     <Intro eyebrow="PENGATURAN AKUN" title="Pengaturan Pengurus" description="Informasi akun dan koneksi penyimpanan aplikasi Masjid Baitul Fadli." />
     <div className="settings-grid">
-      <section className="setting-card"><span><ShieldCheck /></span><div><small>AKUN AKTIF</small><h3>{user.email}</h3><p>Akun ini terdaftar sebagai pengurus aktif dan dapat mengelola data masjid.</p></div></section>
-      <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Firebase Firestore</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>
-      <section className="setting-card wide admin-accounts">
+      <section className="setting-card"><span><ShieldCheck /></span><div><small>AKUN AKTIF</small><h3>{user.email}</h3><p>{isFullAdmin ? "Akun ini terdaftar sebagai pengurus penuh dan dapat mengelola seluruh data masjid." : "Akun ini terdaftar sebagai staff agenda, hanya dapat mengelola kegiatan/agenda masjid."}</p></div></section>
+      {isFullAdmin && <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Firebase Firestore</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>}
+      {isFullAdmin && <section className="setting-card wide admin-accounts">
         <span><UserPlus /></span>
         <div>
           <small>AKUN PENGURUS</small>
           <h3>Kelola Akses Pengurus</h3>
-          <p>Tambahkan akun pengurus baru atau nonaktifkan akses pengurus yang sudah tidak aktif.</p>
+          <p>Tambahkan akun pengurus baru atau nonaktifkan akses pengurus yang sudah tidak aktif. Peran &ldquo;Staff Agenda&rdquo; hanya dapat mengelola kegiatan/agenda, tidak dapat mengakses keuangan, data jamaah, atau master data.</p>
           <div className="admin-list">
-            {admins.map((account) => <div className="admin-row" key={account.id}><span className={account.active ? "on" : "off"}><ShieldCheck /></span><div><strong>{account.email || account.id}</strong><small>{account.active ? "Aktif" : "Nonaktif"}</small></div><Button variant="outline" onClick={() => void toggleAdminActive(account)}>{account.active ? "Nonaktifkan" : "Aktifkan"}</Button></div>)}
+            {admins.map((account) => <div className="admin-row" key={account.id}><span className={account.active ? "on" : "off"}><ShieldCheck /></span><div><strong>{account.email || account.id}</strong><small>{account.active ? "Aktif" : "Nonaktif"} · {account.role === "staff" ? "Staff Agenda" : "Pengurus Penuh"}</small></div><Button variant="outline" onClick={() => void toggleAdminActive(account)}>{account.active ? "Nonaktifkan" : "Aktifkan"}</Button></div>)}
             {!admins.length && <p className="empty">Belum ada data akun pengurus.</p>}
           </div>
           <form className="account-form" onSubmit={submitAdmin}>
             <label className="field">Email pengurus baru<input type="email" value={newEmail} onChange={(event) => setNewEmail(event.target.value)} required /></label>
             <label className="field">Password awal<input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={6} required /></label>
+            <label className="field">Peran akses<select value={newRole} onChange={(event) => setNewRole(event.target.value)}><option value="pengurus">Pengurus Penuh (keuangan, jamaah, master data, agenda)</option><option value="staff">Staff Agenda (hanya kelola kegiatan/agenda)</option></select></label>
             {adminResult && <p className="import-result">{adminResult}</p>}
             <Button className="primary" disabled={addingAdmin}>{addingAdmin ? "Membuat akun..." : "Tambah Akun Pengurus"}</Button>
           </form>
         </div>
-      </section>
-      <section className="setting-card wide finance-import"><span><Wallet /></span><div><small>RIWAYAT KEUANGAN</small><h3>Data sampai 11 September 2026</h3><p>Impor 779 transaksi dari laporan lama. Proses ini aman dijalankan ulang karena menggunakan ID tetap sehingga tidak menggandakan data.</p>{importResult && <p className="import-result">{importResult}</p>}</div><Button className="primary" disabled={importing} onClick={importFinanceHistory}>{importing ? "Mengimpor..." : "Impor ke Firestore"}</Button></section>
+      </section>}
+      {isFullAdmin && <section className="setting-card wide finance-import"><span><Wallet /></span><div><small>RIWAYAT KEUANGAN</small><h3>Data sampai 11 September 2026</h3><p>Impor 779 transaksi dari laporan lama. Proses ini aman dijalankan ulang karena menggunakan ID tetap sehingga tidak menggandakan data.</p>{importResult && <p className="import-result">{importResult}</p>}</div><Button className="primary" disabled={importing} onClick={importFinanceHistory}>{importing ? "Mengimpor..." : "Impor ke Firestore"}</Button></section>}
       <section className="setting-card wide"><span><Landmark /></span><div><small>IDENTITAS APLIKASI</small><h3>Masjid Baitul Fadli</h3><p>Logo resmi dan nama masjid telah diterapkan pada tampilan aplikasi.</p></div><Button variant="outline" onClick={logout}><LogOut />Keluar dari akun</Button></section>
-      <section className="setting-card wide qris-settings">
+      {isFullAdmin && <section className="setting-card wide qris-settings">
         <span><QrCode /></span>
         <div>
           <small>QRIS & REKENING DONASI</small>
@@ -678,7 +697,7 @@ function SettingsPage({ user, logout, donationSettings, saveDonationSettings, up
           </div>
           {uploadResult && <p className="import-result">{uploadResult}</p>}
         </div>
-      </section>
+      </section>}
     </div>
     <p className="app-signature">Powered by: PT Multi Power Abadi</p>
   </div>;
