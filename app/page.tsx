@@ -365,7 +365,7 @@ export default function Page() {
       <button className="brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button>
       <p className="caption">MENU UTAMA</p>
       <nav>{nav.map(([id, label, Icon]) => <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><Icon />{label}</button>)}</nav>
-      <div className="sidebar-foot">{admin && <button className={view === "pengaturan" ? "active" : ""} onClick={() => setView("pengaturan")}><Settings />Pengaturan</button>}<section><ShieldCheck /><strong>{admin ? (isFullAdmin ? "Mode pengurus aktif" : "Mode staff agenda") : "Data masjid aman"}</strong><small>{admin ? (isFullAdmin ? "Anda dapat mengelola data masjid." : "Anda dapat mengelola agenda kegiatan.") : "Informasi publik dapat dibuka tanpa akun."}</small></section></div>
+      <div className="sidebar-foot">{admin && <button className={view === "pengaturan" ? "active" : ""} onClick={() => setView("pengaturan")}><Settings />Pengaturan</button>}{admin && <button onClick={() => void logout()}><LogOut />Keluar</button>}<section><ShieldCheck /><strong>{admin ? (isFullAdmin ? "Mode pengurus aktif" : "Mode staff agenda") : "Data masjid aman"}</strong><small>{admin ? (isFullAdmin ? "Anda dapat mengelola data masjid." : "Anda dapat mengelola agenda kegiatan.") : "Informasi publik dapat dibuka tanpa akun."}</small></section></div>
     </aside>
     <main>
       <header className="clean-header"><button className="mobile-brand" onClick={handleLogoTap} aria-label="Logo Masjid Baitul Fadli"><Image src="/logo-baitul-fadli-header.png" alt="Masjid Baitul Fadli" width={1198} height={572} priority /></button></header>
@@ -519,7 +519,7 @@ function formatCountdown(value: number) {
 function PrayerHero({ onOpen, prayer }: { onOpen: () => void; prayer: PrayerState }) {
   const { schedule, next, countdown, loading, failed, location, useGps, locating } = prayer;
   return <section className="prayer-hero">
-    <div className="prayer-copy"><button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating} title="Gunakan lokasi GPS saya"><MapPin />{locating ? "Mencari lokasi..." : location}</button><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong><small>Metode Kementerian Agama RI · WIB</small></div>
+    <div className="prayer-copy"><button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating} title="Gunakan lokasi GPS saya"><MapPin />{locating ? "Mencari lokasi..." : location}</button><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong></div>
     <button className="prayer-link" onClick={onOpen}>Lihat jadwal lengkap <ChevronRight /></button>
   </section>;
 }
@@ -527,7 +527,7 @@ function PrayerHero({ onOpen, prayer }: { onOpen: () => void; prayer: PrayerStat
 function PrayerPage({ prayer }: { prayer: PrayerState }) {
   const { schedule, dateLabel, loading, failed, next, countdown, reload, location, useGps, locating, gpsError } = prayer;
   return <div className="stack prayer-page">
-    <Intro eyebrow="WAKTU IBADAH" title="Jadwal Shalat Hari Ini" description="Jadwal menggunakan metode Kementerian Agama Republik Indonesia. Sesuaikan lokasi dengan GPS untuk jadwal yang lebih akurat." />
+    <Intro eyebrow="WAKTU IBADAH" title="Jadwal Shalat Hari Ini" description="Sesuaikan lokasi dengan GPS untuk jadwal yang lebih akurat." />
     <div className="finance-toolbar no-print">
       <button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating}><MapPin />{locating ? "Mencari lokasi..." : location}</button>
       <Button variant="outline" disabled={locating} onClick={useGps}><LocateFixed />{locating ? "Mencari..." : "Gunakan Lokasi GPS Saya"}</Button>
@@ -796,7 +796,7 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
         <Button variant="outline" onClick={() => window.print()}><FileDown />Ekspor PDF</Button>
         <Button variant="outline" onClick={exportExcel}><Download />Ekspor Excel</Button>
       </div>
-      <div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(openingBalance + income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div>
+      <div className="stats two"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /></div>
       {!kas && perKas.length > 1 && <Panel title="Saldo per Kas" action={perKas.length + " akun"}><div className="table"><div className="tr th"><span>Kas</span><span>Pemasukan</span><span>Pengeluaran</span><span>Saldo</span><span /></div>{perKas.map((row) => <div className="tr" key={row.name}><span><strong>{row.name}</strong></span><span>{money(row.income)}</span><span>{money(row.expense)}</span><b className={row.balance >= 0 ? "plus" : "minus"}>{money(row.balance)}</b><span /></div>)}</div></Panel>}
       <Panel title="Daftar Transaksi" action={ledgerRows.length + " transaksi"}><div className="table ledger-table">
         <div className="tr ledger-row th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span className="num">Uang Masuk</span><span className="num">Uang Keluar</span><span className="num">Saldo</span><span /></div>
