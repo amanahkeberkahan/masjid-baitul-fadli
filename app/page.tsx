@@ -97,6 +97,13 @@ function previousMonthId(period: string) {
   const [year, month] = period.split("-").map(Number);
   return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date(Date.UTC(year, month - 2, 1)));
 }
+function defaultFinanceRange() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return { from: `${value.year}-${value.month}-01`, to: `${value.year}-${value.month}-${value.day}` };
+}
 
 function mapRecord(kind: Kind, item: QueryDocumentSnapshot<DocumentData>): DataRecord {
   const data = item.data();
@@ -701,14 +708,19 @@ function Intro({ eyebrow, title, description, children }: { eyebrow: string; tit
 
 function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRecord[]; cashAccounts: CategoryItem[]; add: () => void; edit: (record: DataRecord) => void; remove: (record: DataRecord) => void }) {
   const allItems = records.filter((item) => item.kind === "transaction");
-  const months = Array.from(new Set(allItems.map((item) => item.date.slice(0, 7)).filter(Boolean))).sort().reverse();
   const kasNames = Array.from(new Set([...cashAccounts.map((item) => item.name), ...allItems.map((item) => item.kas).filter(Boolean)]));
-  const [month, setMonth] = useState("");
+  const [dateFrom, setDateFrom] = useState(() => defaultFinanceRange().from);
+  const [dateTo, setDateTo] = useState(() => defaultFinanceRange().to);
   const [kas, setKas] = useState("");
-  const items = (month ? allItems.filter((item) => item.date.slice(0, 7) === month) : allItems).filter((item) => !kas || item.kas === kas);
+  const items = allItems.filter((item) =>
+    (!dateFrom || item.date >= dateFrom) && (!dateTo || item.date <= dateTo) && (!kas || item.kas === kas));
   const income = items.filter((item) => item.type === "Pemasukan").reduce((sum, item) => sum + item.amount, 0);
   const expense = items.filter((item) => item.type === "Pengeluaran").reduce((sum, item) => sum + item.amount, 0);
-  const periodLabel = month ? monthId(month) : "Seluruh periode";
+  const periodLabel = dateFrom && dateTo
+    ? (dateFrom === dateTo ? dateId(dateFrom) : `${dateId(dateFrom)} - ${dateId(dateTo)}`)
+    : dateFrom ? `Sejak ${dateId(dateFrom)}`
+    : dateTo ? `Sampai ${dateId(dateTo)}`
+    : "Seluruh periode";
   const now = new Date();
   const printedLabel = `${new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Jakarta" }).format(now)} - ${new Intl.DateTimeFormat("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta", hour12: false }).format(now)}`;
 
@@ -720,31 +732,56 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
   }).filter((row) => row.count > 0);
 
   const ledgerSource = (kas ? allItems.filter((item) => item.kas === kas) : allItems).slice().sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-  const periodStart = month ? `${month}-01` : "";
-  const periodEnd = month ? (() => { const [y, m] = month.split("-").map(Number); return new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10); })() : "";
-  const openingBalance = periodStart ? ledgerSource.filter((item) => item.date < periodStart).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
+  const openingBalance = dateFrom ? ledgerSource.filter((item) => item.date < dateFrom).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
   const ledgerRows: Array<DataRecord & { runningBalance: number }> = ledgerSource
-    .filter((item) => !periodStart || (item.date >= periodStart && item.date < periodEnd))
+    .filter((item) => (!dateFrom || item.date >= dateFrom) && (!dateTo || item.date <= dateTo))
     .reduce<Array<DataRecord & { runningBalance: number }>>((rows, item) => {
       const previousBalance = rows.length ? rows[rows.length - 1].runningBalance : openingBalance;
       const runningBalance = previousBalance + (item.type === "Pemasukan" ? item.amount : -item.amount);
       return [...rows, { ...item, runningBalance }];
     }, []);
 
+  function exportExcel() {
+    const escapeCell = (value: string | number) => {
+      const text = String(value);
+      return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const header = ["No", "Tanggal", "Kategori", "Keterangan", "Kas", "Uang Masuk", "Uang Keluar", "Saldo"];
+    const rows: Array<(string | number)[]> = [
+      ["", "", dateFrom ? `Saldo sebelum ${dateId(dateFrom)}` : "Saldo Awal", "", "", "", "", openingBalance],
+      ...ledgerRows.map((item, index) => [
+        index + 1, item.date || "-", item.category || "-", item.title, item.kas || "-",
+        item.type === "Pemasukan" ? item.amount : "", item.type === "Pengeluaran" ? item.amount : "", item.runningBalance,
+      ]),
+      ["", "", "Total", "", "", income, expense, openingBalance + income - expense],
+    ];
+    const csvContent = "\uFEFF" + [header, ...rows].map((row) => row.map(escapeCell).join(",")).join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const fileLabel = (dateFrom || dateTo ? `${dateFrom || "Awal"}_${dateTo || "Sekarang"}` : "Seluruh-Periode") + (kas ? `-${kas}` : "");
+    link.href = url;
+    link.download = `Laporan-Kas-Masjid-Baitul-Fadli-${fileLabel}.csv`.replace(/\s+/g, "-");
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return <div className="stack">
-    <div className="print-header"><h1>Masjid Baitul Fadli</h1><h2>LAPORAN KAS</h2><p>{month ? `Periode ${periodLabel}` : "Seluruh Periode"}</p></div>
+    <div className="print-header"><h1>Masjid Baitul Fadli</h1><h2>LAPORAN KAS</h2><p>{dateFrom || dateTo ? `Periode ${periodLabel}` : "Seluruh Periode"}</p></div>
     <div className="no-print">
       <Intro eyebrow="TRANSPARAN & AKUNTABEL" title="Laporan Keuangan Masjid" description="Data keuangan hanya dapat dibuka dan dikelola oleh pengurus."><Button className="primary" onClick={add}><Plus />Catat Transaksi</Button></Intro>
       <div className="finance-toolbar">
-        <label className="field">Filter bulan<select value={month} onChange={(event) => setMonth(event.target.value)}><option value="">Semua periode</option>{months.map((value) => <option key={value} value={value}>{monthId(value)}</option>)}</select></label>
+        <label className="field">Dari tanggal<input type="date" value={dateFrom} max={dateTo || undefined} onChange={(event) => setDateFrom(event.target.value)} /></label>
+        <label className="field">Sampai tanggal<input type="date" value={dateTo} min={dateFrom || undefined} onChange={(event) => setDateTo(event.target.value)} /></label>
         <label className="field">Kas<select value={kas} onChange={(event) => setKas(event.target.value)}><option value="">Semua kas</option>{kasNames.map((value) => <option key={value}>{value}</option>)}</select></label>
         <Button variant="outline" onClick={() => window.print()}><FileDown />Ekspor PDF</Button>
+        <Button variant="outline" onClick={exportExcel}><Download />Ekspor Excel</Button>
       </div>
       <div className="stats three"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /><Stat label="Saldo" value={money(income - expense)} note={items.length + " transaksi"} icon={<Wallet />} color="navy" /></div>
       {!kas && perKas.length > 1 && <Panel title="Saldo per Kas" action={perKas.length + " akun"}><div className="table"><div className="tr th"><span>Kas</span><span>Pemasukan</span><span>Pengeluaran</span><span>Saldo</span><span /></div>{perKas.map((row) => <div className="tr" key={row.name}><span><strong>{row.name}</strong></span><span>{money(row.income)}</span><span>{money(row.expense)}</span><b className={row.balance >= 0 ? "plus" : "minus"}>{money(row.balance)}</b><span /></div>)}</div></Panel>}
       <Panel title="Daftar Transaksi" action={ledgerRows.length + " transaksi"}><div className="table ledger-table">
         <div className="tr ledger-row th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span className="num">Uang Masuk</span><span className="num">Uang Keluar</span><span className="num">Saldo</span><span /></div>
-        {periodStart && <div className="tr ledger-row ledger-opening"><span>Saldo per akhir {previousMonthId(month)}</span><span /><span /><span className="num" /><span className="num" /><span className="num">{money(openingBalance)}</span><span /></div>}
+        {dateFrom && <div className="tr ledger-row ledger-opening"><span>Saldo sebelum {dateId(dateFrom)}</span><span /><span /><span className="num" /><span className="num" /><span className="num">{money(openingBalance)}</span><span /></div>}
         {ledgerRows.map((item) => <div className="tr ledger-row" key={item.id}>
           <span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span>
           <span>{item.date || "-"}</span>
@@ -754,7 +791,14 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
           <b className="num">{money(item.runningBalance)}</b>
           <div className="row-actions"><button onClick={() => edit(item)} aria-label="Edit transaksi"><Pencil /></button><button onClick={() => remove(item)} aria-label="Hapus transaksi"><Trash2 /></button></div>
         </div>)}
-        {!ledgerRows.length && <p className="empty">Belum ada transaksi.</p>}
+        {ledgerRows.length > 0 && <div className="tr ledger-row ledger-total">
+          <span><strong>Total</strong></span><span /><span />
+          <b className="num plus">{money(income)}</b>
+          <b className="num minus">{money(expense)}</b>
+          <b className="num">{money(openingBalance + income - expense)}</b>
+          <span />
+        </div>}
+        {!ledgerRows.length && <p className="empty">Belum ada transaksi pada rentang tanggal ini.</p>}
       </div></Panel>
     </div>
     {kas ? <>
@@ -765,7 +809,7 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
       <table className="print-table">
         <thead><tr><th>No</th><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo Akhir</th></tr></thead>
         <tbody>
-          <tr><td colSpan={6}>{month ? `Saldo per akhir ${previousMonthId(month)}` : "Saldo Awal"}</td><td className="num">{money(openingBalance)}</td></tr>
+          <tr><td colSpan={6}>{dateFrom ? `Saldo sebelum ${dateId(dateFrom)}` : "Saldo Awal"}</td><td className="num">{money(openingBalance)}</td></tr>
           {ledgerRows.map((item, index) => <tr key={item.id}><td>{index + 1}</td><td>{item.date || "-"}</td><td>{item.category || "-"}</td><td>{item.title}</td><td className="num">{item.type === "Pemasukan" ? money(item.amount) : ""}</td><td className="num">{item.type === "Pengeluaran" ? money(item.amount) : ""}</td><td className="num">{money(item.runningBalance)}</td></tr>)}
           {!ledgerRows.length && <tr><td colSpan={7}>Belum ada transaksi pada periode ini.</td></tr>}
           <tr className="total"><td colSpan={4}>Total</td><td className="num">{money(income)}</td><td className="num">{money(expense)}</td><td className="num">{money(openingBalance + income - expense)}</td></tr>
