@@ -122,14 +122,84 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
 .sidebar-toggle:focus-visible{outline:3px solid #39c2ee;outline-offset:3px}
 @media(min-width:801px){
  .sidebar{transition:width .2s ease,padding .2s ease}
+ .sidebar .brand{flex:0 0 76px;width:100%;height:76px;min-height:76px;display:flex;align-items:center;justify-content:center;padding:6px 8px}
+ .sidebar .brand img{display:block;position:static;width:100%;height:100%;max-width:100%;max-height:100%;min-width:0;min-height:0;object-fit:contain;object-position:center;padding:0}
+ .sidebar>.caption,.sidebar>.sidebar-foot{flex-shrink:0}
+ .sidebar>nav{min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain}
  .shell>main{transition:margin-left .2s ease}
  .sidebar-collapsed .sidebar{width:80px;padding-left:12px;padding-right:12px}
  .sidebar-collapsed>main{margin-left:80px}
- .sidebar-collapsed .sidebar .brand{height:56px;border-radius:8px}
- .sidebar-collapsed .sidebar .brand img{padding:2px}
+ .sidebar-collapsed .sidebar .brand{flex-basis:56px;height:56px;min-height:56px;border-radius:8px}
+ .sidebar-collapsed .sidebar .brand{padding:2px}
  .sidebar-collapsed .sidebar .caption,.sidebar-collapsed .sidebar-label,.sidebar-collapsed .sidebar-foot section{display:none}
  .sidebar-collapsed .sidebar nav button,.sidebar-collapsed .sidebar-foot>button{justify-content:center;padding:14px 0;gap:0;min-height:46px}
  .sidebar-collapsed .sidebar nav svg,.sidebar-collapsed .sidebar-foot>button svg{width:21px;height:21px;flex-shrink:0}
 }
 @media(max-width:800px){.sidebar-toggle{display:none}}
 @media(prefers-reduced-motion:reduce){.sidebar,.shell>main{transition:none}}
+
+.stat-period{display:block;font-size:12px;font-weight:500;line-height:1.6;margin-top:2px}
+.finance-page{grid-template-columns:minmax(0,1fr);width:100%}
+.finance-page,.finance-page>.no-print,.finance-page .panel{min-width:0;max-width:100%}
+.finance-page>.no-print{width:100%;overflow:visible}
+.finance-page .intro{display:flex;flex-wrap:wrap;gap:16px;align-items:center;width:100%;min-width:0}
+.finance-page .intro>div{min-width:0;flex:1 1 280px}
+.finance-page .intro>button,.finance-page .finance-toolbar>button{flex-shrink:0;white-space:nowrap;min-height:42px;height:auto}
+.finance-page .finance-toolbar{align-items:flex-end;margin-top:20px}
+.finance-page .finance-toolbar .field{flex:1 1 170px;min-width:0;max-width:100%}
+.finance-page .finance-toolbar :is(input,select){width:100%;min-width:0}
+.finance-page .panel-head{flex-wrap:wrap;gap:10px}
+.finance-page .panel-head button{flex-shrink:0;white-space:nowrap}
+.finance-page .table{display:block;width:100%;max-width:100%;min-width:0;overflow-x:auto}
+.finance-page .ledger-table{display:block;width:100%;max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:8px;scrollbar-width:thin}
+.finance-page .ledger-row>*{min-width:0}
+.finance-page .ledger-row>span:first-child strong{overflow-wrap:anywhere;line-height:1.5}
+.finance-page .ledger-row>span:nth-child(3){display:flex;flex-wrap:wrap;gap:5px}
+.finance-page .ledger-row em{white-space:normal;overflow-wrap:anywhere}
+.finance-page .row-actions button{flex-shrink:0;width:32px;height:36px;display:grid;place-items:center;border-radius:6px}
+.finance-page .row-actions button:hover{background:#e8f2f7}
+@media(min-width:801px){
+ .finance-page .ledger-grid{width:100%;min-width:860px}
+ .finance-page .tr.ledger-row{display:grid;grid-template-columns:minmax(150px,1.7fr) 86px minmax(100px,1.1fr) repeat(3,minmax(106px,1fr)) 76px;min-width:0;width:100%;box-sizing:border-box;padding:14px 10px;gap:10px}
+ .finance-page .ledger-row .num{font-size:12px;white-space:nowrap}
+ .finance-page .tr.ledger-row .row-actions{position:static;grid-column:7;justify-self:stretch;display:flex;align-items:center;justify-content:center;gap:8px;padding:0;margin:0}
+ .finance-page .actions-heading{text-align:center}
+}
+@media(max-width:800px){
+ .finance-page .intro>div{flex-basis:auto}
+ .finance-page .tr.ledger-row:not(.th){min-width:0;align-items:stretch;padding:16px;gap:8px}
+ .finance-page .tr.ledger-row .row-actions{position:static;align-self:flex-end;display:flex;gap:8px;margin-top:4px}
+ .finance-page .ledger-row .num{white-space:normal;overflow-wrap:anywhere}
+}
+
+/* Keep dashboard amounts readable at every sidebar width. */
+.stats.dashboard-stats{grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr))}
+.dashboard-stats .stat{grid-template-columns:42px minmax(0,1fr);row-gap:8px;align-content:start}
+.dashboard-stats .stat-icon{grid-column:1;grid-row:1}
+.dashboard-stats .stat>small{grid-column:2;grid-row:1;align-self:center}
+.dashboard-stats .stat>strong{grid-column:1/-1;grid-row:2;white-space:nowrap;word-break:normal;overflow-wrap:normal;font-size:clamp(17px,1.65vw,20px);font-variant-numeric:tabular-nums;letter-spacing:-.025em}
+.dashboard-stats .stat>em{grid-column:1/-1;grid-row:3}
+.dashboard-stats .stat>small{white-space:normal;line-height:1.45}
+@media(max-width:380px){
+ .dashboard-stats .stat{column-gap:10px;padding:16px}
+ .dashboard-stats .stat>strong{font-size:17px}
+}
+
+/* Scrollbars follow the blue theme; sidebar tracks stay transparent. */
+:root,body,.shell *{scrollbar-width:thin;scrollbar-color:#2f709e #e1ebf2}
+::-webkit-scrollbar{width:10px;height:10px;background:#e1ebf2}
+::-webkit-scrollbar-track{background:#e1ebf2;border-radius:8px}
+::-webkit-scrollbar-thumb{background:#2f709e;border-radius:999px;border:2px solid #e1ebf2;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background-color:#164b76}
+::-webkit-scrollbar-corner{background:#e1ebf2}
+.shell .sidebar,.shell .sidebar *{scrollbar-color:#659ac5 transparent;scrollbar-width:thin}
+.sidebar::-webkit-scrollbar,.sidebar *::-webkit-scrollbar{background:transparent}
+.sidebar::-webkit-scrollbar-track,.sidebar *::-webkit-scrollbar-track{background:transparent}
+.sidebar::-webkit-scrollbar-thumb,.sidebar *::-webkit-scrollbar-thumb{background-color:#659ac5;border-color:transparent}
+.sidebar::-webkit-scrollbar-thumb:hover,.sidebar *::-webkit-scrollbar-thumb:hover{background-color:#83aed0}
+.sidebar::-webkit-scrollbar-corner,.sidebar *::-webkit-scrollbar-corner{background:transparent}
+/* Chromium supports both APIs; use pseudo-elements for the full custom style. */
+@supports selector(::-webkit-scrollbar){
+ :root,body,.shell *,.shell .sidebar,.shell .sidebar *{scrollbar-width:auto;scrollbar-color:auto}
+}
+@media(forced-colors:active){:root,body,.shell *,.shell .sidebar,.shell .sidebar *{scrollbar-color:auto}}

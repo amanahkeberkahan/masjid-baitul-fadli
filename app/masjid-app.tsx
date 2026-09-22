@@ -444,15 +444,15 @@ function Dashboard({ records, finance, admin, go, donate, joinSupporter, prayer 
   return <>
     <PrayerHero onOpen={() => go("shalat")} prayer={prayer} />
     <section className="welcome modern-welcome"><div className="welcome-copy"><p className="eyebrow">ASSALAMUALAIKUM</p><h2>Semoga hari ini penuh keberkahan.</h2><p>Informasi kegiatan, program, dan layanan jamaah Masjid Baitul Fadli.</p><div className="actions"><Button onClick={donate}><HeartHandshake />Dukung Masjid</Button><Button variant="outline" onClick={joinSupporter}><UserPlus />Jadi Donatur Tetap</Button></div></div><div className="mosque-photo"><Image src="/masjid-baitul-fadli.webp" alt="Fasad Masjid Baitul Fadli di Gunung Anyar, Surabaya" fill sizes="100vw" priority /></div></section>
-    <div className={admin ? "stats" : "stats public-stats"}>{admin ? <>
+    <div className={admin ? "stats dashboard-stats" : "stats public-stats"}>{admin ? <>
       <Stat label="Saldo Kas" value={money(finance.balance)} note={`Diperbarui ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="green" />
       <Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="blue" />
       <Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" />
       <Stat label="Jamaah Terdaftar" value={String(members.length)} note="Data pengurus" icon={<Users />} color="navy" />
     </> : <>
       <Stat label={`Saldo ${previousMonthId(finance.period)}`} value={money(finance.openingBalance)} note="Saldo awal bulan" icon={<Wallet />} color="navy" />
-      <Stat label={`Uang Masuk ${monthId(finance.period)}`} value={money(finance.periodIncome)} note="Penerimaan bulan berjalan" icon={<ArrowDownLeft />} color="green" />
-      <Stat label={`Uang Keluar ${monthId(finance.period)}`} value={money(finance.periodExpense)} note="Pengeluaran bulan berjalan" icon={<ArrowUpRight />} color="gold" />
+      <Stat label={<>Uang Masuk<span className="stat-period">{monthId(finance.period)}</span></>} value={money(finance.periodIncome)} note="Penerimaan bulan berjalan" icon={<ArrowDownLeft />} color="green" />
+      <Stat label={<>Uang Keluar<span className="stat-period">{monthId(finance.period)}</span></>} value={money(finance.periodExpense)} note="Pengeluaran bulan berjalan" icon={<ArrowUpRight />} color="gold" />
       <Stat label={`Saldo ${monthId(finance.period)}`} value={money(finance.balance)} note={`Diperbarui ${dateId(finance.updatedThrough)}`} icon={<Wallet />} color="blue" />
     </>}</div>
     <div className="dashboard-grid">
@@ -768,7 +768,7 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
   </div>;
 }
 
-function Stat({ label, value, note, icon, color }: { label: string; value: string; note: string; icon: React.ReactNode; color: string }) {
+function Stat({ label, value, note, icon, color }: { label: React.ReactNode; value: string; note: string; icon: React.ReactNode; color: string }) {
   return <article className="stat"><span className={"stat-icon " + color}>{icon}</span><small>{label}</small><strong>{value}</strong><em>{note}</em></article>;
 }
 function Panel({ title, action, onAction, children }: { title: string; action: string; onAction?: () => void; children: React.ReactNode }) {
@@ -850,7 +850,7 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
     URL.revokeObjectURL(url);
   }
 
-  return <div className="stack">
+  return <div className="stack finance-page">
     <div className="print-header"><h1>Masjid Baitul Fadli</h1><h2>LAPORAN KAS</h2><p>{dateFrom || dateTo ? `Periode ${periodLabel}` : "Seluruh Periode"}</p></div>
     <div className="no-print">
       <Intro eyebrow="TRANSPARAN & AKUNTABEL" title="Laporan Keuangan Masjid" description="Data keuangan hanya dapat dibuka dan dikelola oleh pengurus."><Button className="primary" onClick={add}><Plus />Catat Transaksi</Button></Intro>
@@ -863,8 +863,8 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
       </div>
       <div className="stats two"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /></div>
       {!kas && perKas.length > 1 && <Panel title="Saldo per Kas" action={perKas.length + " akun"}><div className="table"><div className="tr th"><span>Kas</span><span>Pemasukan</span><span>Pengeluaran</span><span>Saldo</span><span /></div>{perKas.map((row) => <div className="tr" key={row.name}><span><strong>{row.name}</strong></span><span>{money(row.income)}</span><span>{money(row.expense)}</span><b className={row.balance >= 0 ? "plus" : "minus"}>{money(row.balance)}</b><span /></div>)}</div></Panel>}
-      <Panel title="Daftar Transaksi" action={ledgerRows.length + " transaksi"}><div className="table ledger-table">
-        <div className="tr ledger-row th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span className="num">Uang Masuk</span><span className="num">Uang Keluar</span><span className="num">Saldo</span><span /></div>
+      <Panel title="Daftar Transaksi" action={ledgerRows.length + " transaksi"}><div className="table ledger-table"><div className="ledger-grid">
+        <div className="tr ledger-row th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span className="num">Uang Masuk</span><span className="num">Uang Keluar</span><span className="num">Saldo</span><span className="actions-heading">Aksi</span></div>
         {dateFrom && <div className="tr ledger-row ledger-opening"><span>Saldo sebelum {dateId(dateFrom)}</span><span /><span /><span className="num" /><span className="num" /><span className="num">{money(openingBalance)}</span><span /></div>}
         {ledgerRows.map((item) => <div className="tr ledger-row" key={item.id}>
           <span><i className={"dot " + (item.type === "Pemasukan" ? "in" : "out")} /><strong>{item.title}</strong></span>
@@ -883,7 +883,7 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
           <span />
         </div>}
         {!ledgerRows.length && <p className="empty">Belum ada transaksi pada rentang tanggal ini.</p>}
-      </div></Panel>
+      </div></div></Panel>
     </div>
     {kas ? <>
       <table className="print-summary"><tbody>
