@@ -821,6 +821,15 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
     return { name, opening, income: kasIncome, expense: kasExpense, balance: opening + kasIncome - kasExpense, count: kasItems.length };
   }).filter((row) => row.count > 0);
 
+  const expenseByCategory = Array.from(items.filter((item) => item.type === "Pengeluaran")
+    .reduce((map, item) => {
+      const key = item.category || "Tanpa Kategori";
+      map.set(key, (map.get(key) ?? 0) + item.amount);
+      return map;
+    }, new Map<string, number>()))
+    .map(([name, amount]) => ({ name, amount }))
+    .sort((a, b) => b.amount - a.amount);
+
   const ledgerSource = (kas ? allItems.filter((item) => item.kas === kas) : allItems).slice().sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
   const openingBalance = dateFrom ? ledgerSource.filter((item) => item.date < dateFrom).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
   const ledgerRows: Array<DataRecord & { runningBalance: number }> = ledgerSource
@@ -869,6 +878,7 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
       </div>
       <div className="stats two"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /></div>
       {!kas && perKas.length > 1 && <Panel title="Saldo per Kas" action={perKas.length + " akun"}><div className="table"><div className="tr th kas-summary"><span>Kas</span><span>Saldo Awal</span><span>Pemasukan</span><span>Pengeluaran</span><span>Saldo Akhir</span><span /></div>{perKas.map((row) => <div className="tr kas-summary" key={row.name}><span><strong>{row.name}</strong></span><span>{money(row.opening)}</span><span>{money(row.income)}</span><span>{money(row.expense)}</span><b className={row.balance >= 0 ? "plus" : "minus"}>{money(row.balance)}</b><span /></div>)}</div></Panel>}
+      {expenseByCategory.length > 0 && <Panel title="Pengeluaran per Kategori" action={expenseByCategory.length + " kategori"}><div className="table"><div className="tr th category-summary"><span>Kategori</span><span>Nominal</span><span /></div>{expenseByCategory.map((row) => <div className="tr category-summary" key={row.name}><span><strong>{row.name}</strong></span><b className="minus">{money(row.amount)}</b><span /></div>)}</div></Panel>}
       <Panel title="Daftar Transaksi" action={ledgerRows.length + " transaksi"}><div className="table ledger-table"><div className="ledger-grid">
         <div className="tr ledger-row th"><span>Transaksi</span><span>Tanggal</span><span>Kategori</span><span className="num">Uang Masuk</span><span className="num">Uang Keluar</span><span className="num">Saldo</span><span className="actions-heading">Aksi</span></div>
         {dateFrom && <div className="tr ledger-row ledger-opening"><span>Saldo sebelum {dateId(dateFrom)}</span><span /><span /><span className="num" /><span className="num" /><span className="num">{money(openingBalance)}</span><span /></div>}
@@ -896,6 +906,16 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
         <tr><td>Saldo Awal</td><td>{money(openingBalance)}</td></tr>
         <tr><td>Nama Kas</td><td>{kas}</td></tr>
       </tbody></table>
+      {expenseByCategory.length > 0 && <>
+        <p className="print-section-label">Rekap Pengeluaran per Kategori</p>
+        <table className="print-table">
+          <thead><tr><th>Kategori</th><th>Nominal</th></tr></thead>
+          <tbody>
+            {expenseByCategory.map((row) => <tr key={row.name}><td>{row.name}</td><td className="num">{money(row.amount)}</td></tr>)}
+            <tr className="total"><td>Total Pengeluaran</td><td className="num">{money(expense)}</td></tr>
+          </tbody>
+        </table>
+      </>}
       <table className="print-table">
         <thead><tr><th>No</th><th>Tanggal</th><th>Kategori</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo Akhir</th></tr></thead>
         <tbody>
@@ -919,6 +939,16 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
           <tbody>
             {perKas.map((row) => <tr key={row.name}><td>{row.name}</td><td className="num">{money(row.opening)}</td><td className="num">{money(row.income)}</td><td className="num">{money(row.expense)}</td><td className="num">{money(row.balance)}</td></tr>)}
             <tr className="total"><td>Total</td><td className="num">{money(perKas.reduce((sum, row) => sum + row.opening, 0))}</td><td className="num">{money(perKas.reduce((sum, row) => sum + row.income, 0))}</td><td className="num">{money(perKas.reduce((sum, row) => sum + row.expense, 0))}</td><td className="num">{money(perKas.reduce((sum, row) => sum + row.balance, 0))}</td></tr>
+          </tbody>
+        </table>
+      </>}
+      {expenseByCategory.length > 0 && <>
+        <p className="print-section-label">Rekap Pengeluaran per Kategori</p>
+        <table className="print-table">
+          <thead><tr><th>Kategori</th><th>Nominal</th></tr></thead>
+          <tbody>
+            {expenseByCategory.map((row) => <tr key={row.name}><td>{row.name}</td><td className="num">{money(row.amount)}</td></tr>)}
+            <tr className="total"><td>Total Pengeluaran</td><td className="num">{money(expense)}</td></tr>
           </tbody>
         </table>
       </>}

@@ -102,6 +102,7 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
 .admin-list{display:grid;gap:0;margin:16px 0}.admin-row{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;padding:10px 4px;border-top:1px solid #edf1ef}.admin-row:first-child{border-top:0}.admin-row>span{width:36px;height:36px;border-radius:10px;display:grid;place-items:center}.admin-row>span svg{width:16px}.admin-row>span.on{background:#e6f5fa;color:#147fa8}.admin-row>span.off{background:#f2f2f2;color:#8b9893}.admin-row strong,.admin-row small{display:block}.admin-row small{color:#84918c;font-size:11px;margin-top:2px}
 .admin-accounts .account-form{margin-top:6px;padding-top:14px;border-top:1px dashed #e1e9e5}
 .tr.kas-summary{grid-template-columns:minmax(150px,1.2fr) 1fr 1fr 1fr 1fr 30px}
+.tr.category-summary{grid-template-columns:minmax(200px,1.6fr) 1fr 30px}
 .print-section-label{display:none}
 @media print{.print-section-label{display:block!important;font:12px/1.4 Arial,sans-serif;font-weight:800;margin:10px 0 4px;color:#111}}
 @media(max-width:800px){
