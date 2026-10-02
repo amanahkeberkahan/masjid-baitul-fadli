@@ -2,12 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
-import type { User } from "firebase/auth";
-import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "firebase/auth";
-import {
-  addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query,
-  serverTimestamp, setDoc, writeBatch, type DocumentData, type QueryDocumentSnapshot, type Unsubscribe,
-} from "firebase/firestore";
+import type { User } from "@supabase/supabase-js";
 import {
   ArrowDownLeft, ArrowUpRight, Building2, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight,
   Clock3, Download, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
@@ -15,8 +10,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { auth, db, getSecondaryAuth } from "@/lib/firebase";
+import { supabase } from "@/lib/supabase";
 import historicalTransactions from "@/data/finance-history.json";
+
+type SupabaseRow = Record<string, unknown>;
 
 type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "master" | "pengaturan" | "menu";
 type Kind = "transaction" | "program" | "event" | "member" | "structure";
@@ -37,9 +34,22 @@ type FinanceSummary = {
   updatedThrough: string; live: boolean;
 };
 
-const paths: Record<Kind, string> = {
-  transaction: "transactions", program: "programs", event: "events", member: "members", structure: "orgStructure",
+const tables: Record<Kind, string> = {
+  transaction: "transactions", program: "programs", event: "events", member: "members", structure: "org_structure",
 };
+const fieldsByKind: Record<Kind, Array<keyof SaveRecord>> = {
+  transaction: ["title", "date", "amount", "type", "category", "details", "kas"],
+  program: ["title", "amount", "target", "category", "details"],
+  event: ["title", "date", "category", "details", "imageUrl"],
+  member: ["title", "phone", "address", "type", "category"],
+  structure: ["title", "category", "phone"],
+};
+const columnByField: Partial<Record<keyof SaveRecord, string>> = { imageUrl: "image_url" };
+function toRow(kind: Kind, data: SaveRecord): SupabaseRow {
+  const row: SupabaseRow = {};
+  for (const field of fieldsByKind[kind]) row[columnByField[field] ?? field] = data[field];
+  return row;
+}
 const publicNav = [
   ["beranda", "Beranda", Home],
   ["shalat", "Jadwal Shalat", Clock3],
@@ -105,21 +115,20 @@ function defaultFinanceRange() {
   return { from: `${value.year}-${value.month}-01`, to: `${value.year}-${value.month}-${value.day}` };
 }
 
-function mapRecord(kind: Kind, item: QueryDocumentSnapshot<DocumentData>): DataRecord {
-  const data = item.data();
-  const storedImageUrl = String(data.imageUrl ?? "");
+function mapRecord(kind: Kind, row: SupabaseRow): DataRecord {
+  const storedImageUrl = String(row.image_url ?? "");
   // Serve the bundled replacement for the unavailable original poster.
   // Newly uploaded posters keep their own URL.
   const imageUrl = kind === "event" && storedImageUrl === "https://i.ibb.co/whS6pWJV/Gemini-Generated-Image-b6je8sb6je8sb6je.jpg"
     ? "/images/kajian-subuh-rabu.jpeg"
     : storedImageUrl;
-  const createdAt = data.createdAt && typeof data.createdAt.toMillis === "function" ? data.createdAt.toMillis() : 0;
+  const createdAt = row.created_at ? new Date(String(row.created_at)).getTime() : 0;
   return {
-    id: item.id, kind, title: String(data.title ?? ""), date: String(data.date ?? ""),
-    amount: Number(data.amount ?? 0), type: String(data.type ?? ""),
-    category: String(data.category ?? ""), details: String(data.details ?? ""),
-    target: Number(data.target ?? 0), phone: String(data.phone ?? ""),
-    address: String(data.address ?? ""), kas: String(data.kas ?? ""), imageUrl,
+    id: String(row.id), kind, title: String(row.title ?? ""), date: String(row.date ?? ""),
+    amount: Number(row.amount ?? 0), type: String(row.type ?? ""),
+    category: String(row.category ?? ""), details: String(row.details ?? ""),
+    target: Number(row.target ?? 0), phone: String(row.phone ?? ""),
+    address: String(row.address ?? ""), kas: String(row.kas ?? ""), imageUrl,
     createdAt,
   };
 }
@@ -177,47 +186,60 @@ export function MasjidApp() {
   }, [view, viewRestored, storageKey, sidebarCollapsed]);
 
   useEffect(() => {
-    return onAuthStateChanged(auth, async (currentUser) => {
-    setUser(currentUser);
-    setAdmin(false);
-    setRole("pengurus");
-    if (!currentUser) {
-      setRecords((current) => current.filter((item) => item.kind === "program" || item.kind === "event"));
-    }
-    if (currentUser) {
+    let cancelled = false;
+    async function syncAdminStatus(currentUser: User | null) {
+      if (cancelled) return;
+      setUser(currentUser);
+      setAdmin(false);
+      setRole("pengurus");
+      if (!currentUser) {
+        setRecords((current) => current.filter((item) => item.kind === "program" || item.kind === "event"));
+        setAuthReady(true);
+        return;
+      }
       try {
-        const status = await getDoc(doc(db, "admins", currentUser.uid));
-        const active = status.exists() && status.data().active === true;
+        const { data, error: queryError } = await supabase.from("admins").select("active, role").eq("id", currentUser.id).maybeSingle();
+        if (queryError) throw queryError;
+        const active = data?.active === true;
         setAdmin(active);
-        setRole(active ? String(status.data()?.role ?? "pengurus") : "pengurus");
+        setRole(active ? String(data?.role ?? "pengurus") : "pengurus");
       } catch {
         setError("Status pengurus tidak dapat diverifikasi.");
       }
+      setAuthReady(true);
     }
-    setAuthReady(true);
-    });
+    supabase.auth.getSession().then(({ data }) => void syncAdminStatus(data.session?.user ?? null));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => void syncAdminStatus(session?.user ?? null));
+    return () => { cancelled = true; listener.subscription.unsubscribe(); };
   }, []);
 
   useEffect(() => {
-    const unsubscribers: Unsubscribe[] = [];
+    const unsubscribers: Array<() => void> = [];
     const subscribe = (kind: Kind) => {
-      const source = query(collection(db, paths[kind]), orderBy("createdAt", "desc"));
-      unsubscribers.push(onSnapshot(source, (snapshot) => {
-        const next = snapshot.docs.map((item) => mapRecord(kind, item));
+      const table = tables[kind];
+      async function fetchAll() {
+        const { data, error: queryError } = await supabase.from(table).select("*").order("created_at", { ascending: false });
+        if (queryError) { setError("Sebagian data belum dapat dimuat. Silakan muat ulang halaman."); return; }
+        const next = (data ?? []).map((row) => mapRecord(kind, row));
         setRecords((current) => [...current.filter((item) => item.kind !== kind), ...next]);
         if (kind === "transaction") {
           const summary = summarizeTransactions(next);
           setFinanceSummary(summary);
-          void setDoc(doc(db, "publicStats", "finance"), {
-            income: summary.income, expense: summary.expense, balance: summary.balance,
-            openingBalance: summary.openingBalance, periodIncome: summary.periodIncome,
-            periodExpense: summary.periodExpense, period: summary.period,
-            transactionCount: summary.transactionCount, updatedThrough: summary.updatedThrough,
-            updatedAt: serverTimestamp(),
-          }, { merge: true }).catch(() => undefined);
+          void supabase.from("public_stats").upsert({
+            key: "finance", income: summary.income, expense: summary.expense, balance: summary.balance,
+            opening_balance: summary.openingBalance, period_income: summary.periodIncome,
+            period_expense: summary.periodExpense, period: summary.period,
+            transaction_count: summary.transactionCount, updated_through: summary.updatedThrough,
+            updated_at: new Date().toISOString(),
+          });
         }
         setError("");
-      }, () => setError("Sebagian data belum dapat dimuat. Silakan muat ulang halaman.")));
+      }
+      void fetchAll();
+      const channel = supabase.channel(`${table}-changes`)
+        .on("postgres_changes", { event: "*", schema: "public", table }, () => void fetchAll())
+        .subscribe();
+      unsubscribers.push(() => void supabase.removeChannel(channel));
     };
     subscribe("program");
     subscribe("event");
@@ -225,157 +247,174 @@ export function MasjidApp() {
       subscribe("transaction");
       subscribe("member");
       subscribe("structure");
-      const mapCategory = (item: QueryDocumentSnapshot<DocumentData>): CategoryItem => {
-        const data = item.data();
-        return { id: item.id, name: String(data.name ?? ""), type: String(data.type ?? "") };
+      const subscribeCategories = (table: string, setValue: (value: CategoryItem[]) => void) => {
+        async function fetchAll() {
+          const { data } = await supabase.from(table).select("*").order("name");
+          setValue((data ?? []).map((row) => ({ id: String(row.id), name: String(row.name ?? ""), type: String(row.type ?? "") })));
+        }
+        void fetchAll();
+        const channel = supabase.channel(`${table}-changes`)
+          .on("postgres_changes", { event: "*", schema: "public", table }, () => void fetchAll())
+          .subscribe();
+        unsubscribers.push(() => void supabase.removeChannel(channel));
       };
-      const subscribeCategories = (path: string, setValue: (value: CategoryItem[]) => void) => {
-        unsubscribers.push(onSnapshot(query(collection(db, path), orderBy("name")), (snapshot) => {
-          setValue(snapshot.docs.map(mapCategory));
-        }, () => undefined));
-      };
-      subscribeCategories("financeCategories", setFinanceCategories);
-      subscribeCategories("memberCategories", setMemberCategories);
-      subscribeCategories("cashAccounts", setCashAccounts);
-      unsubscribers.push(onSnapshot(collection(db, "admins"), (snapshot) => {
-        setAdmins(snapshot.docs.map((item) => ({
-          id: item.id, email: String(item.data().email ?? ""), active: item.data().active === true,
-          role: String(item.data().role ?? "pengurus"),
+      subscribeCategories("finance_categories", setFinanceCategories);
+      subscribeCategories("member_categories", setMemberCategories);
+      subscribeCategories("cash_accounts", setCashAccounts);
+      async function fetchAdmins() {
+        const { data } = await supabase.from("admins").select("*");
+        setAdmins((data ?? []).map((row) => ({
+          id: String(row.id), email: String(row.email ?? ""), active: row.active === true,
+          role: String(row.role ?? "pengurus"),
         })));
-      }, () => undefined));
+      }
+      void fetchAdmins();
+      const adminsChannel = supabase.channel("admins-changes")
+        .on("postgres_changes", { event: "*", schema: "public", table: "admins" }, () => void fetchAdmins())
+        .subscribe();
+      unsubscribers.push(() => void supabase.removeChannel(adminsChannel));
     }
     return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
   }, [isFullAdmin]);
 
-  useEffect(() => onSnapshot(doc(db, "settings", "donation"), (snapshot) => {
-    if (!snapshot.exists()) return;
-    const data = snapshot.data();
-    setDonationSettings({
-      bankName: String(data.bankName ?? ""), accountNumber: String(data.accountNumber ?? ""),
-      accountHolder: String(data.accountHolder ?? ""), qrisUrl: String(data.qrisUrl ?? ""),
-    });
-  }, () => undefined), []);
+  useEffect(() => {
+    async function fetchSettings() {
+      const { data } = await supabase.from("settings").select("*").eq("key", "donation").maybeSingle();
+      if (!data) return;
+      setDonationSettings({
+        bankName: String(data.bank_name ?? ""), accountNumber: String(data.account_number ?? ""),
+        accountHolder: String(data.account_holder ?? ""), qrisUrl: String(data.qris_url ?? ""),
+      });
+    }
+    void fetchSettings();
+    const channel = supabase.channel("settings-donation")
+      .on("postgres_changes", { event: "*", schema: "public", table: "settings", filter: "key=eq.donation" }, () => void fetchSettings())
+      .subscribe();
+    return () => void supabase.removeChannel(channel);
+  }, []);
 
-  useEffect(() => onSnapshot(doc(db, "publicStats", "finance"), (snapshot) => {
-    if (!snapshot.exists()) return;
-    const data = snapshot.data();
-    const balance = Number(data.balance);
-    if (!Number.isFinite(balance)) return;
-    setFinanceSummary({
-      income: Number(data.income ?? 0), expense: Number(data.expense ?? 0), balance,
-      openingBalance: Number(data.openingBalance ?? historicalFinance.openingBalance),
-      periodIncome: Number(data.periodIncome ?? historicalFinance.periodIncome),
-      periodExpense: Number(data.periodExpense ?? historicalFinance.periodExpense),
-      period: String(data.period ?? historicalFinance.period),
-      transactionCount: Number(data.transactionCount ?? 0),
-      updatedThrough: String(data.updatedThrough ?? ""), live: true,
-    });
-  }, () => undefined), []);
+  useEffect(() => {
+    async function fetchStats() {
+      const { data } = await supabase.from("public_stats").select("*").eq("key", "finance").maybeSingle();
+      if (!data) return;
+      const balance = Number(data.balance);
+      if (!Number.isFinite(balance)) return;
+      setFinanceSummary({
+        income: Number(data.income ?? 0), expense: Number(data.expense ?? 0), balance,
+        openingBalance: Number(data.opening_balance ?? historicalFinance.openingBalance),
+        periodIncome: Number(data.period_income ?? historicalFinance.periodIncome),
+        periodExpense: Number(data.period_expense ?? historicalFinance.periodExpense),
+        period: String(data.period ?? historicalFinance.period),
+        transactionCount: Number(data.transaction_count ?? 0),
+        updatedThrough: String(data.updated_through ?? ""), live: true,
+      });
+    }
+    void fetchStats();
+    const channel = supabase.channel("public-stats-finance")
+      .on("postgres_changes", { event: "*", schema: "public", table: "public_stats", filter: "key=eq.finance" }, () => void fetchStats())
+      .subscribe();
+    return () => void supabase.removeChannel(channel);
+  }, []);
 
   async function login(email: string, password: string) {
-    const credential = await signInWithEmailAndPassword(auth, email, password);
-    const status = await getDoc(doc(db, "admins", credential.user.uid));
-    if (!status.exists() || status.data().active !== true) {
-      await signOut(auth);
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInError || !data.user) throw new Error("Email atau password salah.");
+    const { data: adminRow } = await supabase.from("admins").select("active").eq("id", data.user.id).maybeSingle();
+    if (!adminRow || adminRow.active !== true) {
+      await supabase.auth.signOut();
       throw new Error("Akun bukan pengurus aktif.");
     }
     setLoginOpen(false);
   }
   async function logout() {
-    await signOut(auth);
+    await supabase.auth.signOut();
     setAdmin(false);
     if (view === "keuangan" || view === "jamaah" || view === "pengaturan") setView("beranda");
   }
   async function save(data: SaveRecord) {
     if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
     if (!isFullAdmin && data.kind !== "event") throw new Error("Staff agenda hanya dapat mengelola data kegiatan.");
-    await addDoc(collection(db, paths[data.kind]), {
-      ...data, createdAt: serverTimestamp(), createdBy: user.uid,
-    });
+    const row = toRow(data.kind, data);
+    row.created_by = user.id;
+    const { error: insertError } = await supabase.from(tables[data.kind]).insert(row);
+    if (insertError) throw new Error(insertError.message);
     setForm(null);
   }
   async function update(record: DataRecord, data: SaveRecord) {
     if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
     if (!isFullAdmin && record.kind !== "event") throw new Error("Staff agenda hanya dapat mengelola data kegiatan.");
-    await setDoc(doc(db, paths[record.kind], record.id), { ...data, updatedAt: serverTimestamp(), updatedBy: user.uid }, { merge: true });
+    const row = toRow(record.kind, data);
+    row.updated_at = new Date().toISOString();
+    row.updated_by = user.id;
+    const { error: updateError } = await supabase.from(tables[record.kind]).update(row).eq("id", record.id);
+    if (updateError) throw new Error(updateError.message);
     setForm(null); setEditing(null);
   }
   async function remove(record: DataRecord) {
     if (!admin || !confirm("Hapus data ini?")) return;
     if (!isFullAdmin && record.kind !== "event") return;
-    await deleteDoc(doc(db, paths[record.kind], record.id));
+    await supabase.from(tables[record.kind]).delete().eq("id", record.id);
   }
   function editStart(record: DataRecord) {
     setEditing(record); setForm(record.kind);
   }
   async function registerSupporter(data: SupporterEntry) {
-    await addDoc(collection(db, "supporters"), {
-      ...data, status: "baru", createdAt: serverTimestamp(),
-    });
+    await supabase.from("supporters").insert({ ...data, status: "baru" });
   }
+  const categoryTables: Record<string, string> = {
+    cashAccounts: "cash_accounts", financeCategories: "finance_categories", memberCategories: "member_categories",
+  };
   async function addCategory(path: string, name: string, type: string) {
     if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
-    await addDoc(collection(db, path), { name, type, createdAt: serverTimestamp() });
+    await supabase.from(categoryTables[path] ?? path).insert({ name, type });
   }
   async function removeCategory(path: string, id: string) {
     if (!admin || !confirm("Hapus kategori ini?")) return;
-    await deleteDoc(doc(db, path, id));
+    await supabase.from(categoryTables[path] ?? path).delete().eq("id", id);
   }
   async function saveDonationSettings(data: DonationSettings) {
     if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
-    await setDoc(doc(db, "settings", "donation"), { ...data, updatedAt: serverTimestamp() }, { merge: true });
+    await supabase.from("settings").upsert({
+      key: "donation", bank_name: data.bankName, account_number: data.accountNumber,
+      account_holder: data.accountHolder, qris_url: data.qrisUrl, updated_at: new Date().toISOString(),
+    });
   }
-  async function uploadImage(file: File) {
-    const body = new FormData();
-    body.append("file", file);
-    const response = await fetch("/api/upload-image", { method: "POST", body });
-    const payload = await response.json() as { url?: string; error?: string };
-    if (!response.ok || !payload.url) throw new Error(payload.error || "Gagal mengunggah gambar.");
-    return payload.url;
+  async function uploadImage(file: File, folder: "events" | "qris") {
+    const path = `${folder}/${Date.now()}-${file.name}`;
+    const { error: uploadError } = await supabase.storage.from("images").upload(path, file, { upsert: false });
+    if (uploadError) throw new Error(uploadError.message || "Gagal mengunggah gambar.");
+    const { data } = supabase.storage.from("images").getPublicUrl(path);
+    return data.publicUrl;
   }
   async function uploadQris(file: File) {
     if (!isFullAdmin) throw new Error("Silakan masuk sebagai pengurus.");
-    const url = await uploadImage(file);
-    await setDoc(doc(db, "settings", "donation"), { qrisUrl: url, updatedAt: serverTimestamp() }, { merge: true });
+    const url = await uploadImage(file, "qris");
+    await supabase.from("settings").upsert({ key: "donation", qris_url: url, updated_at: new Date().toISOString() });
     return url;
   }
   async function uploadEventPoster(file: File) {
     if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
-    return uploadImage(file);
+    return uploadImage(file, "events");
   }
   async function addAdminAccount(email: string, password: string, role: string) {
     if (!isFullAdmin || !user) throw new Error("Hanya pengurus penuh yang dapat menambah akun.");
-    const secondaryAuth = getSecondaryAuth();
-    let uid: string;
-    try {
-      const credential = await createUserWithEmailAndPassword(secondaryAuth, email, password);
-      uid = credential.user.uid;
-    } catch (caught) {
-      const code = caught && typeof caught === "object" && "code" in caught ? String((caught as { code: unknown }).code) : "";
-      if (code !== "auth/email-already-in-use") throw caught;
-      try {
-        const credential = await signInWithEmailAndPassword(secondaryAuth, email, password);
-        uid = credential.user.uid;
-      } catch {
-        throw new Error("Email sudah terdaftar di Firebase Authentication dengan password berbeda. Masukkan password yang benar untuk menautkan akun ini sebagai pengurus, atau gunakan email lain.");
-      }
-    }
-    try {
-      await setDoc(doc(db, "admins", uid), {
-        email, active: true, role, createdAt: serverTimestamp(), createdBy: user.uid,
-      });
-    } catch {
-      await signOut(secondaryAuth);
-      throw new Error("Akun berhasil diverifikasi di Firebase Authentication, tapi gagal disimpan ke daftar pengurus. Firestore Rules kemungkinan belum mengizinkan pengurus menulis ke koleksi admins — minta developer menambahkannya, lalu coba lagi.");
-    }
-    await signOut(secondaryAuth);
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) throw new Error("Sesi tidak valid, silakan masuk ulang.");
+    const response = await fetch("/api/admin/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ email, password, role }),
+    });
+    const payload = await response.json() as { ok?: boolean; error?: string };
+    if (!response.ok || !payload.ok) throw new Error(payload.error || "Gagal membuat akun.");
   }
   async function toggleAdminActive(account: AdminAccount) {
     if (!isFullAdmin) return;
-    if (account.id === user?.uid && account.active) {
+    if (account.id === user?.id && account.active) {
       if (!confirm("Ini akun Anda sendiri. Nonaktifkan akses pengurus untuk akun ini?")) return;
     }
-    await setDoc(doc(db, "admins", account.id), { active: !account.active }, { merge: true });
+    await supabase.from("admins").update({ active: !account.active }).eq("id", account.id);
   }
 
   function handleLogoTap() {
@@ -619,12 +658,6 @@ function AdminMenu({ go, logout }: { go: (view: View) => void; logout: () => Pro
 }
 
 function adminErrorMessage(caught: unknown) {
-  const code = caught && typeof caught === "object" && "code" in caught ? String((caught as { code: unknown }).code) : "";
-  if (code === "auth/email-already-in-use") return "Email ini sudah terdaftar sebagai akun di Firebase Authentication. Gunakan email lain, atau jika akun tersebut memang milik pengurus baru, minta developer menautkan UID-nya ke koleksi admins secara manual.";
-  if (code === "auth/invalid-email") return "Format email tidak valid.";
-  if (code === "auth/weak-password") return "Password terlalu lemah, gunakan minimal 6 karakter.";
-  if (code === "auth/network-request-failed") return "Koneksi bermasalah. Periksa internet lalu coba lagi.";
-  if (code === "auth/operation-not-allowed") return "Metode masuk Email/Password belum diaktifkan di Firebase Authentication.";
   return caught instanceof Error ? caught.message : "Gagal membuat akun pengurus.";
 }
 function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonationSettings, uploadQris, admins, addAdminAccount, toggleAdminActive }: {
@@ -690,32 +723,28 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     if (!confirm("Impor 779 transaksi sampai 11 September 2026? Data lama dengan ID yang sama akan diperbarui, bukan digandakan.")) return;
     setImporting(true); setImportResult("");
     try {
-      for (let start = 0; start < historicalTransactions.length; start += 400) {
-        const batch = writeBatch(db);
-        historicalTransactions.slice(start, start + 400).forEach((item) => {
-          batch.set(doc(db, "transactions", item.id), {
-            title: item.title, date: item.date, amount: item.amount, type: item.type,
-            category: item.category, details: item.details, target: 0, phone: "", address: "",
-            createdAt: new Date(`${item.date}T00:00:00`), createdBy: user.uid,
-            source: "Google Sheet MBF", sourceSheet: item.sourceSheet, importVersion: "2026-09-11",
-          }, { merge: true });
-        });
-        await batch.commit();
+      const rows = historicalTransactions.map((item) => ({
+        legacy_id: item.id, title: item.title, date: item.date, amount: item.amount, type: item.type,
+        category: item.category, details: item.details, created_by: user.id,
+      }));
+      for (let start = 0; start < rows.length; start += 400) {
+        const { error: upsertError } = await supabase.from("transactions").upsert(rows.slice(start, start + 400), { onConflict: "legacy_id" });
+        if (upsertError) throw upsertError;
       }
       try {
-        await setDoc(doc(db, "publicStats", "finance"), {
-          income: historicalFinance.income, expense: historicalFinance.expense,
-          balance: historicalFinance.balance, openingBalance: historicalFinance.openingBalance,
-          periodIncome: historicalFinance.periodIncome, periodExpense: historicalFinance.periodExpense,
-          period: historicalFinance.period, transactionCount: historicalFinance.transactionCount,
-          updatedThrough: historicalFinance.updatedThrough, updatedAt: serverTimestamp(),
-        }, { merge: true });
+        await supabase.from("public_stats").upsert({
+          key: "finance", income: historicalFinance.income, expense: historicalFinance.expense,
+          balance: historicalFinance.balance, opening_balance: historicalFinance.openingBalance,
+          period_income: historicalFinance.periodIncome, period_expense: historicalFinance.periodExpense,
+          period: historicalFinance.period, transaction_count: historicalFinance.transactionCount,
+          updated_through: historicalFinance.updatedThrough, updated_at: new Date().toISOString(),
+        });
         setImportResult("Berhasil: 779 transaksi dan ringkasan saldo publik telah diperbarui. Saldo per 11 September 2026 adalah Rp1.230.000.");
       } catch {
-        setImportResult("Transaksi berhasil diimpor dan saldo aplikasi sudah Rp1.230.000. Agar pembaruan berikutnya tampil untuk jamaah secara langsung, tambahkan izin publicStats pada Rules Firestore.");
+        setImportResult("Transaksi berhasil diimpor dan saldo aplikasi sudah Rp1.230.000. Agar pembaruan berikutnya tampil untuk jamaah secara langsung, periksa RLS public_stats di Supabase.");
       }
     } catch {
-      setImportResult("Impor belum berhasil. Pastikan akun masih aktif dan Rules Firestore mengizinkan pengurus menulis transaksi.");
+      setImportResult("Impor belum berhasil. Pastikan akun masih aktif dan RLS Supabase mengizinkan pengurus menulis transaksi.");
     } finally {
       setImporting(false);
     }
