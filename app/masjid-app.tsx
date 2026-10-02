@@ -23,8 +23,9 @@ type Kind = "transaction" | "program" | "event" | "member" | "structure";
 type DataRecord = {
   id: string; kind: Kind; title: string; date: string; amount: number; type: string;
   category: string; details: string; target: number; phone: string; address: string; kas: string; imageUrl: string;
+  createdAt: number;
 };
-type SaveRecord = Omit<DataRecord, "id">;
+type SaveRecord = Omit<DataRecord, "id" | "createdAt">;
 type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string };
 type CategoryItem = { id: string; name: string; type: string };
 type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string };
@@ -112,12 +113,14 @@ function mapRecord(kind: Kind, item: QueryDocumentSnapshot<DocumentData>): DataR
   const imageUrl = kind === "event" && storedImageUrl === "https://i.ibb.co/whS6pWJV/Gemini-Generated-Image-b6je8sb6je8sb6je.jpg"
     ? "/images/kajian-subuh-rabu.jpeg"
     : storedImageUrl;
+  const createdAt = data.createdAt && typeof data.createdAt.toMillis === "function" ? data.createdAt.toMillis() : 0;
   return {
     id: item.id, kind, title: String(data.title ?? ""), date: String(data.date ?? ""),
     amount: Number(data.amount ?? 0), type: String(data.type ?? ""),
     category: String(data.category ?? ""), details: String(data.details ?? ""),
     target: Number(data.target ?? 0), phone: String(data.phone ?? ""),
     address: String(data.address ?? ""), kas: String(data.kas ?? ""), imageUrl,
+    createdAt,
   };
 }
 
@@ -149,6 +152,9 @@ export function MasjidApp() {
 
   useEffect(() => {
     try {
+      // One-time restore from sessionStorage after mount (SSR has no storage access,
+      // so this can't be a lazy useState initializer).
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSidebarCollapsed(sessionStorage.getItem("mbf-sidebar-collapsed") === "true");
       const saved = sessionStorage.getItem(storageKey);
       if (saved && ["beranda", "shalat", "keuangan", "program", "kegiatan", "jamaah", "master", "pengaturan", "menu"].includes(saved)) {
@@ -815,7 +821,7 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
     return { name, income: kasIncome, expense: kasExpense, balance: kasIncome - kasExpense, count: kasItems.length };
   }).filter((row) => row.count > 0);
 
-  const ledgerSource = (kas ? allItems.filter((item) => item.kas === kas) : allItems).slice().sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  const ledgerSource = (kas ? allItems.filter((item) => item.kas === kas) : allItems).slice().sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
   const openingBalance = dateFrom ? ledgerSource.filter((item) => item.date < dateFrom).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
   const ledgerRows: Array<DataRecord & { runningBalance: number }> = ledgerSource
     .filter((item) => (!dateFrom || item.date >= dateFrom) && (!dateTo || item.date <= dateTo))
