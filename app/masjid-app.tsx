@@ -5,7 +5,7 @@ import Image from "next/image";
 import type { User } from "@supabase/supabase-js";
 import {
   ArrowDownLeft, ArrowUpRight, Building2, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, Download, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
+  Clock3, Download, FileDown, HeartHandshake, Home, KeyRound, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
   Moon, Pencil, Plus, QrCode, RefreshCw, Search, Settings, ShieldCheck, Sun, Tags, Trash2, Upload, UserPlus, Users, Wallet, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -677,6 +677,8 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
   const [newEmail, setNewEmail] = useState(""); const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("pengurus");
   const [addingAdmin, setAddingAdmin] = useState(false); const [adminResult, setAdminResult] = useState("");
+  const [ownPassword, setOwnPassword] = useState(""); const [ownPasswordConfirm, setOwnPasswordConfirm] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false); const [passwordResult, setPasswordResult] = useState("");
 
   async function submitAccount(event: React.FormEvent) {
     event.preventDefault();
@@ -719,6 +721,24 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     }
   }
 
+  async function submitOwnPassword(event: React.FormEvent) {
+    event.preventDefault();
+    setPasswordResult("");
+    if (ownPassword.length < 6) return setPasswordResult("Password minimal 6 karakter.");
+    if (ownPassword !== ownPasswordConfirm) return setPasswordResult("Konfirmasi password tidak sama.");
+    setChangingPassword(true);
+    try {
+      const { error } = await supabase.auth.updateUser({ password: ownPassword });
+      if (error) throw error;
+      setPasswordResult("Password berhasil diganti.");
+      setOwnPassword(""); setOwnPasswordConfirm("");
+    } catch (caught) {
+      setPasswordResult(caught instanceof Error ? caught.message : "Gagal mengganti password.");
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
   async function importFinanceHistory() {
     if (!confirm("Impor 779 transaksi sampai 11 September 2026? Data lama dengan ID yang sama akan diperbarui, bukan digandakan.")) return;
     setImporting(true); setImportResult("");
@@ -754,7 +774,21 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     <Intro eyebrow="PENGATURAN AKUN" title="Pengaturan Pengurus" description="Informasi akun dan koneksi penyimpanan aplikasi Masjid Baitul Fadli." />
     <div className="settings-grid">
       <section className="setting-card"><span><ShieldCheck /></span><div><small>AKUN AKTIF</small><h3>{user.email}</h3><p>{isFullAdmin ? "Akun ini terdaftar sebagai pengurus penuh dan dapat mengelola seluruh data masjid." : "Akun ini terdaftar sebagai staff agenda, hanya dapat mengelola kegiatan/agenda masjid."}</p></div></section>
-      {isFullAdmin && <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Firebase Firestore</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>}
+      <section className="setting-card wide">
+        <span><KeyRound /></span>
+        <div>
+          <small>KEAMANAN AKUN</small>
+          <h3>Ubah Password</h3>
+          <p>Ganti password akun Anda sendiri. Password baru langsung aktif untuk login berikutnya.</p>
+          <form className="account-form" onSubmit={submitOwnPassword}>
+            <label className="field">Password baru<input type="password" value={ownPassword} onChange={(event) => setOwnPassword(event.target.value)} minLength={6} required /></label>
+            <label className="field">Konfirmasi password baru<input type="password" value={ownPasswordConfirm} onChange={(event) => setOwnPasswordConfirm(event.target.value)} minLength={6} required /></label>
+            {passwordResult && <p className="import-result">{passwordResult}</p>}
+            <Button className="primary" disabled={changingPassword}>{changingPassword ? "Menyimpan..." : "Ubah Password"}</Button>
+          </form>
+        </div>
+      </section>
+      {isFullAdmin && <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Supabase</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>}
       {isFullAdmin && <section className="setting-card wide admin-accounts">
         <span><UserPlus /></span>
         <div>
