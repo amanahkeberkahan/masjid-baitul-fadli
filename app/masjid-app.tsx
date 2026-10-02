@@ -876,7 +876,12 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
         <Button variant="outline" onClick={() => window.print()}><FileDown />Ekspor PDF</Button>
         <Button variant="outline" onClick={exportExcel}><Download />Ekspor Excel</Button>
       </div>
-      <div className="stats two"><Stat label="Total Pemasukan" value={money(income)} note="Data Firestore" icon={<ArrowDownLeft />} color="green" /><Stat label="Total Pengeluaran" value={money(expense)} note="Data Firestore" icon={<ArrowUpRight />} color="gold" /></div>
+      <div className="stats dashboard-stats">
+        <Stat label="Saldo Periode Lalu" value={money(openingBalance)} note={dateFrom ? `Sebelum ${dateId(dateFrom)}` : "Seluruh periode"} icon={<Wallet />} color="navy" />
+        <Stat label="Uang Masuk" value={money(income)} note={periodLabel} icon={<ArrowDownLeft />} color="green" />
+        <Stat label="Uang Keluar" value={money(expense)} note={periodLabel} icon={<ArrowUpRight />} color="gold" />
+        <Stat label="Saldo Akhir" value={money(openingBalance + income - expense)} note={dateTo ? `Per ${dateId(dateTo)}` : "Saat ini"} icon={<Wallet />} color="blue" />
+      </div>
       {!kas && perKas.length > 1 && <Panel title="Saldo per Kas" action={perKas.length + " akun"}><div className="table"><div className="tr th kas-summary"><span>Kas</span><span>Saldo Awal</span><span>Pemasukan</span><span>Pengeluaran</span><span>Saldo Akhir</span><span /></div>{perKas.map((row) => <div className="tr kas-summary" key={row.name}><span><strong>{row.name}</strong></span><span>{money(row.opening)}</span><span>{money(row.income)}</span><span>{money(row.expense)}</span><b className={row.balance >= 0 ? "plus" : "minus"}>{money(row.balance)}</b><span /></div>)}</div></Panel>}
       {expenseByCategory.length > 0 && <Panel title="Pengeluaran per Kategori" action={expenseByCategory.length + " kategori"}><div className="table"><div className="tr th category-summary"><span>Kategori</span><span>Nominal</span><span /></div>{expenseByCategory.map((row) => <div className="tr category-summary" key={row.name}><span><strong>{row.name}</strong></span><b className="minus">{money(row.amount)}</b><span /></div>)}</div></Panel>}
       <Panel title="Daftar Transaksi" action={ledgerRows.length + " transaksi"}><div className="table ledger-table"><div className="ledger-grid">
