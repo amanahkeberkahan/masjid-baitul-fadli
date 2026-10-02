@@ -34,10 +34,11 @@ import { collection, getDocs, getFirestore, doc, getDoc } from "firebase/firesto
 
 function loadEnvLocal() {
   try {
-    const content = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
-    for (const line of content.split("\n")) {
+    const raw = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
+    const content = raw.replace(/^﻿/, ""); // buang BOM kalau file disimpan dari Notepad
+    for (const line of content.split(/\r?\n/)) {
       const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
-      if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
+      if (match && !process.env[match[1]]) process.env[match[1]] = match[2].trim();
     }
   } catch {
     // .env.local opsional — bisa juga export env var langsung di shell.
