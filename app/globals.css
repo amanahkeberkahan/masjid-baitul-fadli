@@ -216,3 +216,77 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
  :root,body,.shell *,.shell .sidebar,.shell .sidebar *{scrollbar-width:auto;scrollbar-color:auto}
 }
 @media(forced-colors:active){:root,body,.shell *,.shell .sidebar,.shell .sidebar *{scrollbar-color:auto}}
+/* ===== Donatur Tetap ===== */
+.donor-intro-actions{display:flex;gap:8px;flex-wrap:wrap}
+.donor-notice{display:flex;align-items:center;gap:10px;background:#e6f4ee;color:#075f4a;border:1px solid #bfe0d2;border-radius:10px;padding:10px 12px;margin:0;font-size:14px;font-weight:600}
+.donor-notice svg{width:18px;flex:none}.donor-notice button{margin-left:auto;border:0;background:transparent;color:inherit;display:grid;place-items:center;padding:2px}
+.period-switch{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+.period-switch>button{width:38px;height:38px;border:1px solid #dbe6e0;background:white;border-radius:10px;font-size:20px;line-height:1;color:#08765a}
+.period-switch label{display:flex;align-items:center;gap:8px;background:white;border:1px solid #dbe6e0;border-radius:10px;padding:4px 10px;font-size:12px;font-weight:700;color:#566a63}
+.period-switch input{border:0;font:600 14px Arial;color:#132c29;background:transparent;padding:6px 0;outline:none}
+.period-switch .period-today{width:auto;padding:0 12px;font-size:13px;font-weight:700}
+.donor-tabs{display:flex;gap:6px;background:#e8efeb;border-radius:12px;padding:4px;width:fit-content;max-width:100%;margin-top:4px}
+.donor-tabs button{border:0;background:transparent;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;color:#566a63;white-space:nowrap}
+.donor-tabs button.active{background:white;color:#08765a;box-shadow:0 2px 8px #1c41371a}
+.donor-toolbar{align-items:end}
+.donor-bulk{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:13px 0}
+.text-link{border:0;background:transparent;color:#08765a;font-weight:700;font-size:13px;text-decoration:underline;padding:4px}
+.donor-list{display:grid}
+.donor-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px 4px;border-top:1px solid #edf1ef}
+.donor-row:first-child{border-top:0}
+.donor-row.inactive{opacity:.55}.donor-row.sent{background:#f5faf7}
+.donor-avatar{width:40px;height:40px;background:#e6f2ed;color:#08765a;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:12px;flex:none}
+.donor-avatar.paid{background:#08765a;color:white}.donor-avatar svg{width:20px}
+.donor-main{min-width:0;display:grid;gap:4px;justify-items:start}
+.donor-main strong{font-size:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.donor-main small{font-size:12px;color:#71817b;overflow-wrap:anywhere}
+.donor-main .warn{color:#b37d1e;font-weight:700}
+.donor-tag{font-style:normal;font-size:10px;font-weight:700;background:#eef2f0;color:#566a63;border-radius:20px;padding:2px 7px}
+.donor-badge{font-size:11px;font-weight:700;border-radius:20px;padding:3px 9px}
+.donor-badge.paid{background:#e5f4ed;color:#08765a}.donor-badge.due{background:#fdecea;color:#b84236}
+.donor-badge.wait{background:#fbf3df;color:#94661a}.donor-badge.off{background:#eef2f0;color:#71817b}
+.donor-reminded{font-size:11px!important;color:#8a9893!important}
+.donor-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.donor-actions .primary{height:36px;padding:0 12px;font-size:13px}
+.icon-btn{width:36px;height:36px;border:1px solid #e1e9e5;background:white;border-radius:10px;display:grid;place-items:center;color:#566a63}
+.icon-btn svg{width:16px}
+.wa-btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:10px;background:#1fa855;color:white;font-weight:700;font-size:13px;text-decoration:none;white-space:nowrap}
+.wa-btn:hover{background:#18914a}.wa-btn svg{width:16px}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field-row>.field{margin:6px 0}
+.field-row>button{height:44px}
+.check-field{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#3d524b;margin:12px 0;line-height:1.4}
+.check-field input{width:18px;height:18px;margin:1px 0 0;accent-color:#08765a;flex:none}
+.modal-wide{width:min(620px,100%)}
+.modal-hint{font-size:13px;color:#566a63;line-height:1.55;margin:6px 0 4px}
+.modal-hint code,.import-preview code{background:#eef3f0;border-radius:5px;padding:1px 5px;font-size:12px}
+.import-preview{border:1px solid #dbe6e0;border-radius:12px;padding:12px;margin:8px 0;display:grid;gap:6px}
+.import-preview strong{font-size:14px;color:#08765a}.import-preview small{font-size:12px;color:#94661a}
+.import-preview ul{list-style:none;margin:4px 0 0;padding:0;max-height:220px;overflow:auto}
+.import-preview li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;font-size:13px;padding:6px 0;border-top:1px solid #f0f4f2}
+.import-preview li span:nth-child(2){color:#8a9893}
+.queue-progress{font-size:13px;font-weight:700;color:#08765a;margin:6px 0}
+.queue-list{max-height:48vh;overflow:auto;margin-bottom:12px}
+.template-preview{margin:6px 0 10px;font-size:13px}.template-preview summary{cursor:pointer;font-weight:700;color:#08765a}
+.template-preview pre{white-space:pre-wrap;font:13px/1.5 Arial;background:#e7f7ee;border-radius:12px;padding:12px;margin:8px 0 0}
+.recap-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.recap-table{border-collapse:collapse;width:100%;min-width:760px;font-size:12px}
+.recap-table th,.recap-table td{border-bottom:1px solid #edf1ef;padding:8px 6px;text-align:center}
+.recap-table thead th{color:#71817b;font-weight:700;font-size:11px}
+.recap-table tbody th,.recap-table tfoot th{text-align:left;font-weight:700;position:sticky;left:0;background:white;min-width:130px}
+.recap-table tbody th small{display:block;font-weight:400;color:#8a9893;font-size:11px}
+.recap-table td.paid{background:#e5f4ed;color:#08765a;font-weight:800}
+.recap-table .total{font-weight:700;color:#132c29}
+.recap-table tfoot td,.recap-table tfoot th{font-weight:700;border-top:2px solid #dbe6e0}
+@media(max-width:800px){
+  .donor-row{grid-template-columns:auto minmax(0,1fr)}
+  .donor-actions{grid-column:1/-1;justify-content:flex-start;padding-left:52px}
+  .donor-bulk>button{flex:1 1 auto}
+  .donor-tabs{width:100%}.donor-tabs button{flex:1;padding:9px 8px}
+}
+@media(max-width:430px){.field-row{grid-template-columns:1fr}.donor-actions{padding-left:0}}
+@media(max-width:520px){
+  .donor-actions{flex-wrap:nowrap;gap:5px;padding-left:0}
+  .donor-actions .wa-btn,.donor-actions .primary{flex:1 1 auto;justify-content:center;padding:0 8px;font-size:12px}
+  .donor-actions .icon-btn{width:34px;flex:none}
+}

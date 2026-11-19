@@ -5,17 +5,19 @@ import Image from "next/image";
 import type { User } from "@supabase/supabase-js";
 import {
   ArrowDownLeft, ArrowUpRight, Building2, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, Download, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
+  Clock3, Download, FileDown, HandCoins, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
   Moon, Pencil, Plus, QrCode, RefreshCw, Search, Settings, ShieldCheck, Sun, Tags, Trash2, Upload, UserPlus, Users, Wallet, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/lib/supabase";
 import historicalTransactions from "@/data/finance-history.json";
+import { Intro, NumberField, Panel, Stat, currentJakartaPeriod, dateId, money, monthId } from "./shared";
+import { DonorsPage } from "./donatur";
 
 type SupabaseRow = Record<string, unknown>;
 
-type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "master" | "pengaturan" | "menu";
+type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "donatur" | "master" | "pengaturan" | "menu";
 type Kind = "transaction" | "program" | "event" | "member" | "structure";
 type DataRecord = {
   id: string; kind: Kind; title: string; date: string; amount: number; type: string;
@@ -25,7 +27,7 @@ type DataRecord = {
 type SaveRecord = Omit<DataRecord, "id" | "createdAt">;
 type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string };
 type CategoryItem = { id: string; name: string; type: string };
-type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string };
+type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string; reminderTemplate: string };
 type AdminAccount = { id: string; email: string; active: boolean; role: string };
 type PrayerState = ReturnType<typeof usePrayerTimes>;
 type FinanceSummary = {
@@ -62,18 +64,9 @@ const publicNav = [
 const privateNav = [
   ["keuangan", "Keuangan", Wallet],
   ["jamaah", "Data Jamaah", Users],
+  ["donatur", "Donatur Tetap", HandCoins],
   ["master", "Master Data", Tags],
 ] as const;
-const money = (value: number) => new Intl.NumberFormat("id-ID", {
-  style: "currency", currency: "IDR", maximumFractionDigits: 0,
-}).format(value);
-function currentJakartaPeriod() {
-  const parts = new Intl.DateTimeFormat("en", {
-    timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit",
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}`;
-}
 
 function summarizeTransactions(items: Array<{ type: string; amount: number; date: string }>, live = true): FinanceSummary {
   const period = currentJakartaPeriod();
@@ -97,14 +90,6 @@ function summarizeTransactions(items: Array<{ type: string; amount: number; date
 }
 const historicalFinance = summarizeTransactions(historicalTransactions, false);
 
-function dateId(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || "data terakhir";
-  return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T12:00:00+07:00`));
-}
-function monthId(period: string) {
-  if (!/^\d{4}-\d{2}$/.test(period)) return "bulan ini";
-  return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date(`${period}-01T12:00:00+07:00`));
-}
 function previousMonthId(period: string) {
   if (!/^\d{4}-\d{2}$/.test(period)) return "Bulan Lalu";
   const [year, month] = period.split("-").map(Number);
@@ -196,7 +181,8 @@ export function MasjidApp() {
   const [financeCategories, setFinanceCategories] = useState<CategoryItem[]>([]);
   const [memberCategories, setMemberCategories] = useState<CategoryItem[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CategoryItem[]>([]);
-  const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "" });
+  const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "", reminderTemplate: "" });
+  const [donateAmount, setDonateAmount] = useState<number | null>(null);
   const [admins, setAdmins] = useState<AdminAccount[]>([]);
   const prayer = usePrayerTimes();
   const [error, setError] = useState("");
@@ -210,11 +196,26 @@ export function MasjidApp() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSidebarCollapsed(sessionStorage.getItem("mbf-sidebar-collapsed") === "true");
       const saved = sessionStorage.getItem(storageKey);
-      if (saved && ["beranda", "shalat", "keuangan", "program", "kegiatan", "jamaah", "master", "pengaturan", "menu"].includes(saved)) {
+      if (saved && ["beranda", "shalat", "keuangan", "program", "kegiatan", "jamaah", "donatur", "master", "pengaturan", "menu"].includes(saved)) {
         setView(saved as View);
       }
     } catch {
       // Navigation remains available when browser storage is disabled.
+    }
+    // Link dari pesan pengingat WhatsApp: /?donasi=100000 langsung membuka QRIS dengan nominal terisi.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const nominal = Number(params.get("donasi"));
+      if (params.has("donasi")) {
+        setDonateAmount(Number.isFinite(nominal) && nominal > 0 ? Math.round(nominal) : null);
+        setDonateOpen(true);
+        setView("beranda");
+        params.delete("donasi");
+        const rest = params.toString();
+        window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash);
+      }
+    } catch {
+      // URL tanpa parameter donasi tetap berjalan normal.
     }
     setViewRestored(true);
   }, [storageKey]);
@@ -341,6 +342,7 @@ export function MasjidApp() {
       setDonationSettings({
         bankName: String(data.bank_name ?? ""), accountNumber: String(data.account_number ?? ""),
         accountHolder: String(data.account_holder ?? ""), qrisUrl: String(data.qris_url ?? ""),
+        reminderTemplate: String(data.reminder_template ?? ""),
       });
     }
     void fetchSettings();
@@ -386,7 +388,7 @@ export function MasjidApp() {
   async function logout() {
     await supabase.auth.signOut();
     setAdmin(false);
-    if (view === "keuangan" || view === "jamaah" || view === "pengaturan") setView("beranda");
+    if (["keuangan", "jamaah", "donatur", "master", "pengaturan", "menu"].includes(view)) setView("beranda");
   }
   async function save(data: SaveRecord) {
     if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
@@ -416,7 +418,13 @@ export function MasjidApp() {
     setEditing(record); setForm(record.kind);
   }
   async function registerSupporter(data: SupporterEntry) {
-    await supabase.from("supporters").insert({ ...data, status: "baru" });
+    const { error: insertError } = await supabase.from("supporters").insert({ ...data, status: "baru" });
+    if (insertError) throw new Error(insertError.message);
+  }
+  async function saveReminderTemplate(template: string) {
+    if (!isFullAdmin) throw new Error("Hanya pengurus penuh yang dapat mengubah pesan.");
+    const { error: saveError } = await supabase.from("settings").upsert({ key: "donation", reminder_template: template, updated_at: new Date().toISOString() });
+    if (saveError) throw new Error(saveError.message.includes("reminder_template") ? "Jalankan supabase/donatur_tetap.sql terlebih dahulu." : saveError.message);
   }
   const categoryTables: Record<string, string> = {
     cashAccounts: "cash_accounts", financeCategories: "finance_categories", memberCategories: "member_categories",
@@ -431,10 +439,11 @@ export function MasjidApp() {
   }
   async function saveDonationSettings(data: DonationSettings) {
     if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
-    await supabase.from("settings").upsert({
+    const { error: saveError } = await supabase.from("settings").upsert({
       key: "donation", bank_name: data.bankName, account_number: data.accountNumber,
       account_holder: data.accountHolder, qris_url: data.qrisUrl, updated_at: new Date().toISOString(),
     });
+    if (saveError) throw new Error(saveError.message);
   }
   async function uploadImage(file: File, folder: "events" | "qris") {
     if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)) {
@@ -502,7 +511,7 @@ export function MasjidApp() {
     }
   }
 
-  const needsAuth = ["keuangan", "jamaah", "master", "pengaturan", "menu"].includes(view);
+  const needsAuth = ["keuangan", "jamaah", "donatur", "master", "pengaturan", "menu"].includes(view);
   if (!viewRestored || (needsAuth && !authReady)) {
     return <div role="status" aria-live="polite" style={{ minHeight: "100dvh", display: "grid", placeItems: "center" }}>Memuat halaman...</div>;
   }
@@ -539,16 +548,17 @@ export function MasjidApp() {
           : view === "program" ? <Programs records={records} admin={isFullAdmin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} edit={editStart} remove={remove} />
           : view === "jamaah" && isFullAdmin ? <Members records={records} add={() => setForm("member")} edit={editStart} remove={remove} />
+          : view === "donatur" && isFullAdmin && user ? <DonorsPage donationSettings={donationSettings} cashAccounts={cashAccounts} userId={user.id} saveReminderTemplate={saveReminderTemplate} />
           : view === "master" && isFullAdmin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} isFullAdmin={isFullAdmin} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
           : view === "menu" && isFullAdmin && user ? <AdminMenu go={setView} logout={logout} />
           : <Dashboard records={records} finance={financeSummary} admin={isFullAdmin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} prayer={prayer} />}
       </div>
     </main>
-    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
+    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "donatur", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
     {form && <EntryForm kind={form} editing={editing} close={() => { setForm(null); setEditing(null); }} save={save} update={update} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} uploadPoster={uploadEventPoster} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
-    {donateOpen && <DonationModal close={() => setDonateOpen(false)} donationSettings={donationSettings} />}
+    {donateOpen && <DonationModal close={() => { setDonateOpen(false); setDonateAmount(null); }} donationSettings={donationSettings} initialAmount={donateAmount} />}
     {supporterOpen && <SupporterModal close={() => setSupporterOpen(false)} register={registerSupporter} />}
   </div>;
 }
@@ -733,6 +743,7 @@ function AdminMenu({ go, logout }: { go: (view: View) => void; logout: () => Pro
   const items = [
     ["kegiatan", "Kelola Kegiatan", "Publikasikan agenda masjid", CalendarDays],
     ["jamaah", "Data Jamaah", "Data privat khusus pengurus", Users],
+    ["donatur", "Donatur Tetap", "Ceklis bayar, pengingat WA & QRIS", HandCoins],
     ["master", "Master Data", "Kategori, struktur organisasi", Tags],
     ["pengaturan", "Pengaturan", "Akun, QRIS, dan impor data", Settings],
   ] as const;
@@ -764,10 +775,10 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     event.preventDefault();
     setSavingAccount(true); setAccountResult("");
     try {
-      await saveDonationSettings({ bankName, accountNumber, accountHolder, qrisUrl: donationSettings.qrisUrl });
+      await saveDonationSettings({ ...donationSettings, bankName, accountNumber, accountHolder });
       setAccountResult("Informasi rekening tersimpan.");
     } catch {
-      setAccountResult("Gagal menyimpan. Pastikan Rules Firestore mengizinkan pengurus menulis settings/donation.");
+      setAccountResult("Gagal menyimpan informasi rekening. Pastikan akun Anda pengurus penuh.");
     } finally {
       setSavingAccount(false);
     }
@@ -883,12 +894,6 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
   </div>;
 }
 
-function Stat({ label, value, note, icon, color }: { label: React.ReactNode; value: string; note: string; icon: React.ReactNode; color: string }) {
-  return <article className="stat"><span className={"stat-icon " + color}>{icon}</span><small>{label}</small><strong>{value}</strong><em>{note}</em></article>;
-}
-function Panel({ title, action, onAction, children }: { title: string; action: string; onAction?: () => void; children: React.ReactNode }) {
-  return <section className="panel"><div className="panel-head"><h3>{title}</h3><button onClick={onAction}>{action}<ChevronRight /></button></div>{children}</section>;
-}
 function TransactionList({ records }: { records: DataRecord[] }) {
   if (!records.length) return <p className="empty">Belum ada transaksi.</p>;
   return <div>{records.map((item) => { const incoming = item.type === "Pemasukan"; return <div className="transaction" key={item.id}><span className={incoming ? "in" : "out"}>{incoming ? <ArrowDownLeft /> : <ArrowUpRight />}</span><div><strong>{item.title}</strong><small>{item.date || "Tanpa tanggal"}</small></div><b className={incoming ? "plus" : "minus"}>{incoming ? "+" : "−"}{money(item.amount)}</b></div>; })}</div>;
@@ -900,9 +905,6 @@ function ProgramList({ records }: { records: DataRecord[] }) {
 function EventList({ records }: { records: DataRecord[] }) {
   if (!records.length) return <p className="empty">Belum ada agenda yang dipublikasikan.</p>;
   return <div>{records.map((item) => <div className="event-row" key={item.id}><span className="date"><b>{item.date.slice(8, 10) || "--"}</b><small>{item.date.slice(5, 7) || "BLN"}</small></span><div><strong>{item.title}</strong><small>{item.details || "Informasi menyusul"}</small></div><em>{item.category || "Kegiatan"}</em></div>)}</div>;
-}
-function Intro({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {
-  return <div className="intro"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{description}</p></div>{children}</div>;
 }
 
 function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRecord[]; cashAccounts: CategoryItem[]; add: () => void; edit: (record: DataRecord) => void; remove: (record: DataRecord) => void }) {
@@ -1212,9 +1214,6 @@ function EntryForm({ kind, editing, close, save, update, financeCategories, memb
     : kind === "member" ? (memberOptions.length ? memberOptions : ["Jamaah", "Relawan"]) : [];
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>{editing ? "Edit" : "Tambah"} {labels[kind]}</h2><label className="field">{kind === "member" || kind === "structure" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "event" && <div className="field poster-field"><span>Poster Kegiatan</span><div className="poster-upload-box">{imageUrl ? <div className="poster-preview-wrap"><Image src={imageUrl} alt="Poster kegiatan" width={220} height={140} className="poster-img-preview" unoptimized /><button type="button" className="poster-remove-btn" onClick={() => setImageUrl("")}><X /> Hapus Poster</button></div> : <p className="empty-poster-text">Belum ada poster.</p>}<label className="upload-button"><Upload />{uploadingPoster ? "Mengunggah..." : (imageUrl ? "Ganti Poster" : "Unggah Poster")}<input type="file" accept="image/*" onChange={handlePosterUpload} disabled={uploadingPoster} hidden /></label></div></div>}{kind === "transaction" && <><label className="field">Kas<select value={kas} onChange={(event) => setKas(event.target.value)}><option value="">Pilih kas</option>{cashOptions.map((option) => <option key={option}>{option}</option>)}</select></label><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status Domisili<select value={type} onChange={(event) => setType(event.target.value)}><option>Mukim</option><option>Non-Mukim</option></select></label></>}{kind === "structure" && <><label className="field">Jabatan<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Contoh: Ketua Takmir" /></label><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></>}{kind !== "structure" && <label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>}{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : editing ? "Simpan Perubahan" : "Simpan Data"}</Button></form></div>;
 }
-function NumberField({ label, value, setValue }: { label: string; value: number; setValue: (value: number) => void }) {
-  return <label className="field">{label}<input type="number" min="0" value={value || ""} onChange={(event) => setValue(Number(event.target.value))} /></label>;
-}
 function LoginModal({ close, login }: { close: () => void; login: (email: string, password: string) => Promise<void> }) {
   const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false); const [error, setError] = useState("");
@@ -1224,9 +1223,9 @@ function LoginModal({ close, login }: { close: () => void; login: (email: string
   }
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal login-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">AKSES TERBATAS</p><h2>Masuk sebagai Pengurus</h2><p>Gunakan akun yang telah didaftarkan oleh administrator masjid.</p><label className="field">Email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field">Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Memeriksa..." : "Masuk"}</Button></form></div>;
 }
-function DonationModal({ close, donationSettings }: { close: () => void; donationSettings: DonationSettings }) {
-  const [amount, setAmount] = useState(100000);
-  const [step, setStep] = useState<"amount" | "qris" | "done">("amount");
+function DonationModal({ close, donationSettings, initialAmount }: { close: () => void; donationSettings: DonationSettings; initialAmount?: number | null }) {
+  const [amount, setAmount] = useState(initialAmount ?? 100000);
+  const [step, setStep] = useState<"amount" | "qris" | "done">(initialAmount ? "qris" : "amount");
   const qrisSrc = donationSettings.qrisUrl || "/qris-masjid-baitul-fadli.svg";
   const hasAccount = donationSettings.bankName || donationSettings.accountNumber;
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><section className="modal">
