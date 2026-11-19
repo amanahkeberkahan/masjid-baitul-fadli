@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import type { User } from "@supabase/supabase-js";
 import {
@@ -48,6 +48,9 @@ const columnByField: Partial<Record<keyof SaveRecord, string>> = { imageUrl: "im
 function toRow(kind: Kind, data: SaveRecord): SupabaseRow {
   const row: SupabaseRow = {};
   for (const field of fieldsByKind[kind]) row[columnByField[field] ?? field] = data[field];
+  // Kolom "date" bertipe DATE di Postgres: string kosong ditolak ("invalid input syntax
+  // for type date"), sehingga agenda tanpa tanggal gagal disimpan. Kirim null.
+  if ("date" in row && !row.date) row.date = null;
   return row;
 }
 const publicNav = [
@@ -113,6 +116,47 @@ function defaultFinanceRange() {
   }).formatToParts(new Date());
   const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return { from: `${value.year}-${value.month}-01`, to: `${value.year}-${value.month}-${value.day}` };
+}
+
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // sama dengan file_size_limit bucket "images"
+
+// Foto dari HP biasanya 3-12 MB dan 4000px+. Diperkecil di browser sebelum diunggah
+// supaya tidak menabrak batas 8 MB, upload lebih cepat, dan halaman publik ringan.
+async function compressImage(file: File, maxDimension: number): Promise<Blob> {
+  if (file.type === "image/gif") return file; // jangan rusak animasi
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) { bitmap.close(); return file; }
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.85));
+    const output = blob && blob.type === "image/webp" ? blob
+      : await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (!output) return file;
+    // Kalau file asli sudah kecil dan tidak perlu diperkecil, pakai yang asli.
+    return scale === 1 && output.size >= file.size && file.type !== "image/heic" ? file : output;
+  } catch {
+    // Format yang tidak bisa dibaca browser (mis. HEIC di Chrome): unggah apa adanya.
+    return file;
+  }
+}
+
+function describeUploadError(message: string) {
+  const text = message.toLowerCase();
+  if (text.includes("row-level security") || text.includes("unauthorized") || text.includes("403")) {
+    return "Akun ini belum diizinkan mengunggah gambar. Pastikan akun pengurus aktif dan supabase/storage.sql sudah dijalankan di Supabase.";
+  }
+  if (text.includes("bucket not found")) return "Bucket penyimpanan \"images\" belum dibuat. Jalankan supabase/storage.sql di Supabase SQL Editor.";
+  if (text.includes("exceeded") || text.includes("too large") || text.includes("413")) return "Ukuran gambar melebihi batas 8 MB.";
+  if (text.includes("mime") || text.includes("invalid_mime_type")) return "Format gambar tidak didukung. Gunakan JPG, PNG, atau WEBP.";
+  if (text.includes("fetch") || text.includes("network")) return "Koneksi internet terputus saat mengunggah. Coba lagi.";
+  return `Gagal mengunggah gambar: ${message}`;
 }
 
 function mapRecord(kind: Kind, row: SupabaseRow): DataRecord {
@@ -215,6 +259,13 @@ export function MasjidApp() {
 
   useEffect(() => {
     const unsubscribers: Array<() => void> = [];
+    let lastStatsKey = "";
+    // Beberapa perubahan beruntun (mis. impor/hapus banyak data) cukup memicu satu kali muat ulang.
+    const debounced = (fn: () => Promise<void>) => {
+      let timer: number | undefined;
+      unsubscribers.push(() => window.clearTimeout(timer));
+      return () => { window.clearTimeout(timer); timer = window.setTimeout(() => void fn(), 400); };
+    };
     const subscribe = (kind: Kind) => {
       const table = tables[kind];
       async function fetchAll() {
@@ -225,6 +276,11 @@ export function MasjidApp() {
         if (kind === "transaction") {
           const summary = summarizeTransactions(next);
           setFinanceSummary(summary);
+          const statsKey = JSON.stringify({ ...summary, live: true });
+          // Tulis ringkasan publik hanya jika angkanya berubah, agar tidak memicu
+          // event realtime ke semua pengunjung setiap kali pengurus membuka aplikasi.
+          if (statsKey !== lastStatsKey) lastStatsKey = statsKey;
+          else return setError("");
           void supabase.from("public_stats").upsert({
             key: "finance", income: summary.income, expense: summary.expense, balance: summary.balance,
             opening_balance: summary.openingBalance, period_income: summary.periodIncome,
@@ -236,8 +292,9 @@ export function MasjidApp() {
         setError("");
       }
       void fetchAll();
+      const refetch = debounced(fetchAll);
       const channel = supabase.channel(`${table}-changes`)
-        .on("postgres_changes", { event: "*", schema: "public", table }, () => void fetchAll())
+        .on("postgres_changes", { event: "*", schema: "public", table }, refetch)
         .subscribe();
       unsubscribers.push(() => void supabase.removeChannel(channel));
     };
@@ -380,16 +437,33 @@ export function MasjidApp() {
     });
   }
   async function uploadImage(file: File, folder: "events" | "qris") {
-    const path = `${folder}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from("images").upload(path, file, { upsert: false });
-    if (uploadError) throw new Error(uploadError.message || "Gagal mengunggah gambar.");
+    if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)) {
+      throw new Error("File harus berupa gambar (JPG, PNG, atau WEBP).");
+    }
+    // QRIS harus tetap tajam agar bisa dipindai, jadi resolusinya dijaga lebih tinggi.
+    const prepared = await compressImage(file, folder === "qris" ? 2000 : 1600);
+    if (/hei[cf]/i.test(prepared.type) || /\.hei[cf]$/i.test(file.name) && prepared === file) {
+      throw new Error("Foto format HEIC (iPhone) belum bisa dibaca browser ini. Kirim/screenshot ulang sebagai JPG, atau unggah lewat Safari.");
+    }
+    if (prepared.size > MAX_UPLOAD_BYTES) {
+      throw new Error(`Ukuran gambar ${(prepared.size / 1048576).toFixed(1)} MB, maksimal 8 MB. Kecilkan dulu atau screenshot posternya.`);
+    }
+    // Nama file asli (spasi, emoji, karakter non-ASCII dari WhatsApp/kamera) bisa ditolak
+    // Supabase Storage sebagai "Invalid key", jadi pakai nama aman yang dibuat sendiri.
+    const ext = prepared.type === "image/webp" ? "webp" : prepared.type === "image/png" ? "png" : prepared.type === "image/gif" ? "gif" : "jpg";
+    const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error: uploadError } = await supabase.storage.from("images").upload(path, prepared, {
+      upsert: false, contentType: prepared.type || "image/jpeg", cacheControl: "31536000",
+    });
+    if (uploadError) throw new Error(describeUploadError(uploadError.message));
     const { data } = supabase.storage.from("images").getPublicUrl(path);
     return data.publicUrl;
   }
   async function uploadQris(file: File) {
     if (!isFullAdmin) throw new Error("Silakan masuk sebagai pengurus.");
     const url = await uploadImage(file, "qris");
-    await supabase.from("settings").upsert({ key: "donation", qris_url: url, updated_at: new Date().toISOString() });
+    const { error: settingsError } = await supabase.from("settings").upsert({ key: "donation", qris_url: url, updated_at: new Date().toISOString() });
+    if (settingsError) throw new Error(`QRIS terunggah tapi gagal disimpan ke pengaturan: ${settingsError.message}`);
     return url;
   }
   async function uploadEventPoster(file: File) {
@@ -549,7 +623,6 @@ function usePrayerTimes() {
   const [failed, setFailed] = useState(false);
   const [locating, setLocating] = useState(false);
   const [gpsError, setGpsError] = useState("");
-  const [now, setNow] = useState(() => Date.now());
   const lastCoords = useRef<{ lat: number; lon: number } | undefined>(undefined);
 
   async function load(coords?: { lat: number; lon: number }) {
@@ -601,15 +674,22 @@ function usePrayerTimes() {
     const timer = window.setInterval(() => { void load(lastCoords.current); }, 45000);
     return () => window.clearInterval(timer);
   }, [failed]);
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  return { schedule, dateLabel, location, loading, failed, reload: () => load(lastCoords.current), useGps, locating, gpsError };
+}
 
+// Jam berdetak tiap detik HANYA di komponen yang menampilkan countdown.
+// Sebelumnya detak ini ada di MasjidApp sehingga seluruh aplikasi (termasuk
+// perhitungan laporan keuangan) dirender ulang setiap detik — penyebab utama lag.
+function usePrayerCountdown(schedule: PrayerSchedule | null) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const current = jakartaClock.format(new Date(now)).split(":").map(Number);
   const nowSeconds = current[0] * 3600 + current[1] * 60 + current[2];
   const prayerOnly = prayerItems.filter((item) => item.key !== "Sunrise");
   const next = schedule ? prayerOnly.find((item) => timeToSeconds(schedule[item.key]) > nowSeconds) ?? prayerOnly[0] : null;
   const target = next && schedule ? timeToSeconds(schedule[next.key]) + (next.key === "Fajr" && timeToSeconds(schedule.Fajr) <= nowSeconds ? 86400 : 0) : 0;
   const countdown = target ? formatCountdown(target - nowSeconds) : "--:--:--";
-  return { schedule, dateLabel, location, loading, failed, next, countdown, reload: () => load(lastCoords.current), useGps, locating, gpsError };
+  return { next, countdown };
 }
 
 function timeToSeconds(value: string) {
@@ -625,7 +705,8 @@ function formatCountdown(value: number) {
 }
 
 function PrayerHero({ onOpen, prayer }: { onOpen: () => void; prayer: PrayerState }) {
-  const { schedule, next, countdown, loading, failed, location, useGps, locating } = prayer;
+  const { schedule, loading, failed, location, useGps, locating } = prayer;
+  const { next, countdown } = usePrayerCountdown(schedule);
   return <section className="prayer-hero">
     <div className="prayer-copy"><button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating} title="Gunakan lokasi GPS saya"><MapPin />{locating ? "Mencari lokasi..." : location}</button><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong></div>
     <button className="prayer-link" onClick={onOpen}>Lihat jadwal lengkap <ChevronRight /></button>
@@ -633,7 +714,8 @@ function PrayerHero({ onOpen, prayer }: { onOpen: () => void; prayer: PrayerStat
 }
 
 function PrayerPage({ prayer }: { prayer: PrayerState }) {
-  const { schedule, dateLabel, loading, failed, next, countdown, reload, location, useGps, locating, gpsError } = prayer;
+  const { schedule, dateLabel, loading, failed, reload, location, useGps, locating, gpsError } = prayer;
+  const { next, countdown } = usePrayerCountdown(schedule);
   return <div className="stack prayer-page">
     <Intro eyebrow="WAKTU IBADAH" title="Jadwal Shalat Hari Ini" description="Sesuaikan lokasi dengan GPS untuk jadwal yang lebih akurat." />
     <div className="finance-toolbar no-print">
@@ -698,8 +780,8 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     try {
       await uploadQris(file);
       setUploadResult("QRIS berhasil diunggah dan langsung tampil di halaman donasi.");
-    } catch {
-      setUploadResult("Gagal mengunggah QRIS. Pastikan Firebase Storage sudah aktif dan Rules mengizinkan pengurus menulis.");
+    } catch (caught) {
+      setUploadResult(caught instanceof Error ? caught.message : "Gagal mengunggah QRIS.");
     } finally {
       setUploading(false);
     }
@@ -824,7 +906,7 @@ function Intro({ eyebrow, title, description, children }: { eyebrow: string; tit
 }
 
 function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRecord[]; cashAccounts: CategoryItem[]; add: () => void; edit: (record: DataRecord) => void; remove: (record: DataRecord) => void }) {
-  const allItems = records.filter((item) => item.kind === "transaction");
+  const allItems = useMemo(() => records.filter((item) => item.kind === "transaction"), [records]);
   const kasNames = Array.from(new Set([...cashAccounts.map((item) => item.name), ...allItems.map((item) => item.kas).filter(Boolean)]));
   const [dateFrom, setDateFrom] = useState(() => defaultFinanceRange().from);
   const [dateTo, setDateTo] = useState(() => defaultFinanceRange().to);
@@ -859,15 +941,19 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
     .map(([name, amount]) => ({ name, amount }))
     .sort((a, b) => b.amount - a.amount);
 
-  const ledgerSource = (kas ? allItems.filter((item) => item.kas === kas) : allItems).slice().sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
-  const openingBalance = dateFrom ? ledgerSource.filter((item) => item.date < dateFrom).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
-  const ledgerRows: Array<DataRecord & { runningBalance: number }> = ledgerSource
-    .filter((item) => (!dateFrom || item.date >= dateFrom) && (!dateTo || item.date <= dateTo))
-    .reduce<Array<DataRecord & { runningBalance: number }>>((rows, item) => {
-      const previousBalance = rows.length ? rows[rows.length - 1].runningBalance : openingBalance;
-      const runningBalance = previousBalance + (item.type === "Pemasukan" ? item.amount : -item.amount);
-      return [...rows, { ...item, runningBalance }];
-    }, []);
+  const { openingBalance, ledgerRows } = useMemo(() => {
+    const source = (kas ? allItems.filter((item) => item.kas === kas) : allItems).slice().sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+    const opening = dateFrom ? source.filter((item) => item.date < dateFrom).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
+    // Linear (push), bukan [...rows, item] per baris yang O(n²) dan berat untuk ribuan transaksi.
+    const rows: Array<DataRecord & { runningBalance: number }> = [];
+    let running = opening;
+    for (const item of source) {
+      if ((dateFrom && item.date < dateFrom) || (dateTo && item.date > dateTo)) continue;
+      running += item.type === "Pemasukan" ? item.amount : -item.amount;
+      rows.push({ ...item, runningBalance: running });
+    }
+    return { openingBalance: opening, ledgerRows: rows };
+  }, [allItems, kas, dateFrom, dateTo]);
 
   function exportExcel() {
     const escapeCell = (value: string | number) => {
@@ -1102,14 +1188,17 @@ function EntryForm({ kind, editing, close, save, update, financeCategories, memb
   async function handlePosterUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setUploadingPoster(true);
+    event.target.value = ""; // supaya file yang sama bisa dipilih ulang setelah gagal
+    setUploadingPoster(true); setError("");
     try { setImageUrl(await uploadPoster(file)); }
-    catch { setError("Gagal mengunggah poster. Pastikan Firebase Storage aktif dan Rules mengizinkan pengurus menulis."); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Gagal mengunggah poster."); }
     finally { setUploadingPoster(false); }
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!title) return setError("Nama/judul wajib diisi.");
+    if (!title.trim()) return setError("Nama/judul wajib diisi.");
+    if (kind === "transaction" && !date) return setError("Tanggal transaksi wajib diisi.");
+    if (uploadingPoster) return setError("Tunggu poster selesai diunggah.");
     setBusy(true); setError("");
     const data = { kind, title, date, amount, type, category, details, target, phone, address, kas, imageUrl };
     try { await (editing ? update(editing, data) : save(data)); }
