@@ -8,7 +8,10 @@
 -- ---------------------------------------------------------
 -- status: 'baru' (daftar sendiri lewat website, belum dikonfirmasi) | 'aktif' | 'nonaktif'
 alter table supporters add column if not exists reminder_day int not null default 1;      -- tanggal pengingat tiap bulan (1-28)
-alter table supporters add column if not exists method text not null default 'QRIS';      -- QRIS | Transfer | Tunai
+alter table supporters add column if not exists method text not null default 'Transfer';  -- jalur: 'Transfer' (m-banking/QRIS) | 'Diambil' (dijemput ke rumah)
+alter table supporters alter column method set default 'Transfer';
+alter table supporters add column if not exists collector text not null default '';       -- petugas pengambil (jalur Diambil)
+alter table supporters add column if not exists pickup_note text not null default '';     -- patokan rumah / waktu yang pas
 alter table supporters add column if not exists notes text not null default '';
 alter table supporters add column if not exists anonymous boolean not null default false; -- tampil sebagai "Hamba Allah" di rekap publik
 alter table supporters add column if not exists start_period text not null default '';    -- 'YYYY-MM' mulai berkomitmen
@@ -29,7 +32,9 @@ create table if not exists supporter_payments (
   period text not null,                 -- 'YYYY-MM'
   amount numeric not null default 0,
   paid_at date not null default current_date,
-  method text not null default 'QRIS',
+  method text not null default 'QRIS', -- cara bayar aktual: 'QRIS' | 'Transfer' | 'Tunai'
+  collector text not null default '',   -- petugas yang menerima tunai
+  deposited_at timestamptz,             -- tunai: kapan diserahkan ke bendahara (null = masih di petugas)
   transaction_id uuid references transactions(id) on delete set null, -- baris kas yang ikut dibuat
   note text not null default '',
   created_at timestamptz not null default now(),
@@ -37,6 +42,14 @@ create table if not exists supporter_payments (
   unique (supporter_id, period)
 );
 create index if not exists supporter_payments_period_idx on supporter_payments (period);
+-- Untuk tabel yang sudah terlanjur dibuat dengan versi file sebelumnya:
+alter table supporter_payments add column if not exists collector text not null default '';
+alter table supporter_payments add column if not exists deposited_at timestamptz;
+-- Pembayaran transfer/QRIS dianggap langsung diterima rekening masjid.
+update supporter_payments set deposited_at = created_at where method <> 'Tunai' and deposited_at is null;
+-- Nilai jalur lama (QRIS/Tunai) diseragamkan.
+update supporters set method = 'Transfer' where method in ('QRIS', '');
+update supporters set method = 'Diambil' where method = 'Tunai';
 
 alter table supporter_payments enable row level security;
 drop policy if exists "supporter_payments_all" on supporter_payments;
@@ -97,4 +110,5 @@ where not exists (select 1 from supporters s where lower(s.name) = lower(v.name)
 -- ---------------------------------------------------------
 -- 6. Template pesan pengingat WhatsApp (kosong = pakai pesan bawaan aplikasi)
 -- ---------------------------------------------------------
-alter table settings add column if not exists reminder_template text not null default '';
+alter table settings add column if not exists reminder_template text not null default '';  -- jalur transfer/QRIS
+alter table settings add column if not exists pickup_template text not null default '';    -- jalur diambil ke rumah

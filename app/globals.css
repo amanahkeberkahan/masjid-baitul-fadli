@@ -290,3 +290,37 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
   .donor-actions .wa-btn,.donor-actions .primary{flex:1 1 auto;justify-content:center;padding:0 8px;font-size:12px}
   .donor-actions .icon-btn{width:34px;flex:none}
 }
+/* Donatur Tetap: jalur transfer vs diambil */
+.channel-picker{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.channel-picker button{display:grid;grid-template-columns:auto 1fr;column-gap:8px;row-gap:3px;align-items:center;text-align:left;border:1.5px solid #dbe6e0;background:white;border-radius:12px;padding:11px 12px;color:#3d524b;font:inherit}
+.channel-picker button svg{width:18px;grid-row:1;color:#71817b}
+.channel-picker button strong{font-size:13px;color:#132c29}
+.channel-picker button small{grid-column:1/-1;font-size:11px;font-weight:400;color:#71817b;line-height:1.35}
+.channel-picker button.active{border-color:#08765a;background:#f0f8f4;box-shadow:0 0 0 3px #08765a1a}
+.channel-picker button.active svg{color:#08765a}
+.donor-tag svg{width:11px;height:11px;margin-right:3px;vertical-align:-1px}
+.donor-tag.channel-diambil{background:#eaf1fb;color:#2c5d9a}.donor-tag.channel-transfer{background:#eef6f2;color:#3a6f5c}
+.donor-badge.held{background:#eaf1fb;color:#2c5d9a}
+.recap-table td.held{background:#eaf1fb;color:#2c5d9a;font-weight:800}
+.wa-icon{color:#1fa855}
+.pickup-group{border:1px solid #e6ede9;border-radius:14px;padding:12px 14px;margin-top:12px}
+.pickup-group:first-of-type{margin-top:0}
+.pickup-group-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:8px;border-bottom:1px solid #edf1ef}
+.pickup-group-head strong{display:flex;align-items:center;gap:7px;font-size:15px}
+.pickup-group-head strong svg{width:17px;color:#2c5d9a}
+.pickup-group-head small{display:block;font-size:12px;color:#71817b;margin-top:3px}
+.pickup-group-head .warn{color:#b84236;font-weight:700}
+.pickup-note{color:#566a63!important}
+.held-list{list-style:none;margin:8px 0 0;padding:0}
+.held-list li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;font-size:13px;padding:8px 0;border-top:1px solid #f0f4f2}
+.held-list li:first-child{border-top:0}.held-list li span:nth-child(2){color:#8a9893;font-size:12px}
+.deposit-total{display:flex;justify-content:space-between;align-items:center;background:#f0f8f4;border-radius:12px;padding:12px 14px;margin:12px 0 4px;font-size:13px;color:#3d524b}
+.deposit-total strong{font-size:18px;color:#08765a}
+.donor-tabs.compact{margin:10px 0 2px}
+@media(max-width:520px){
+  .channel-picker{grid-template-columns:1fr}
+  .held-list li{grid-template-columns:minmax(0,1fr) auto}.held-list li span:nth-child(2){grid-column:1;grid-row:2}
+  .pickup-group{padding:10px}
+  .donor-tabs button{font-size:12px;padding:9px 4px}
+}
+.field.channel-field>div.channel-picker{border:0;height:auto;padding:0;display:grid}

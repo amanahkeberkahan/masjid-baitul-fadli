@@ -25,9 +25,9 @@ type DataRecord = {
   createdAt: number;
 };
 type SaveRecord = Omit<DataRecord, "id" | "createdAt">;
-type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string };
+type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string; method: string };
 type CategoryItem = { id: string; name: string; type: string };
-type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string; reminderTemplate: string };
+type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string; reminderTemplate: string; pickupTemplate: string };
 type AdminAccount = { id: string; email: string; active: boolean; role: string };
 type PrayerState = ReturnType<typeof usePrayerTimes>;
 type FinanceSummary = {
@@ -181,7 +181,7 @@ export function MasjidApp() {
   const [financeCategories, setFinanceCategories] = useState<CategoryItem[]>([]);
   const [memberCategories, setMemberCategories] = useState<CategoryItem[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CategoryItem[]>([]);
-  const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "", reminderTemplate: "" });
+  const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "", reminderTemplate: "", pickupTemplate: "" });
   const [donateAmount, setDonateAmount] = useState<number | null>(null);
   const [admins, setAdmins] = useState<AdminAccount[]>([]);
   const prayer = usePrayerTimes();
@@ -342,7 +342,7 @@ export function MasjidApp() {
       setDonationSettings({
         bankName: String(data.bank_name ?? ""), accountNumber: String(data.account_number ?? ""),
         accountHolder: String(data.account_holder ?? ""), qrisUrl: String(data.qris_url ?? ""),
-        reminderTemplate: String(data.reminder_template ?? ""),
+        reminderTemplate: String(data.reminder_template ?? ""), pickupTemplate: String(data.pickup_template ?? ""),
       });
     }
     void fetchSettings();
@@ -421,10 +421,12 @@ export function MasjidApp() {
     const { error: insertError } = await supabase.from("supporters").insert({ ...data, status: "baru" });
     if (insertError) throw new Error(insertError.message);
   }
-  async function saveReminderTemplate(template: string) {
+  async function saveReminderTemplates(templates: { reminder: string; pickup: string }) {
     if (!isFullAdmin) throw new Error("Hanya pengurus penuh yang dapat mengubah pesan.");
-    const { error: saveError } = await supabase.from("settings").upsert({ key: "donation", reminder_template: template, updated_at: new Date().toISOString() });
-    if (saveError) throw new Error(saveError.message.includes("reminder_template") ? "Jalankan supabase/donatur_tetap.sql terlebih dahulu." : saveError.message);
+    const { error: saveError } = await supabase.from("settings").upsert({
+      key: "donation", reminder_template: templates.reminder, pickup_template: templates.pickup, updated_at: new Date().toISOString(),
+    });
+    if (saveError) throw new Error(/reminder_template|pickup_template/.test(saveError.message) ? "Jalankan supabase/donatur_tetap.sql terlebih dahulu." : saveError.message);
   }
   const categoryTables: Record<string, string> = {
     cashAccounts: "cash_accounts", financeCategories: "finance_categories", memberCategories: "member_categories",
@@ -548,7 +550,7 @@ export function MasjidApp() {
           : view === "program" ? <Programs records={records} admin={isFullAdmin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} edit={editStart} remove={remove} />
           : view === "jamaah" && isFullAdmin ? <Members records={records} add={() => setForm("member")} edit={editStart} remove={remove} />
-          : view === "donatur" && isFullAdmin && user ? <DonorsPage donationSettings={donationSettings} cashAccounts={cashAccounts} userId={user.id} saveReminderTemplate={saveReminderTemplate} />
+          : view === "donatur" && isFullAdmin && user ? <DonorsPage donationSettings={donationSettings} cashAccounts={cashAccounts} userId={user.id} saveTemplates={saveReminderTemplates} />
           : view === "master" && isFullAdmin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} isFullAdmin={isFullAdmin} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
           : view === "menu" && isFullAdmin && user ? <AdminMenu go={setView} logout={logout} />
@@ -1247,12 +1249,14 @@ function DonationModal({ close, donationSettings, initialAmount }: { close: () =
 function SupporterModal({ close, register }: { close: () => void; register: (data: SupporterEntry) => Promise<void> }) {
   const [name, setName] = useState(""); const [phone, setPhone] = useState(""); const [address, setAddress] = useState("");
   const [amount, setAmount] = useState(100000); const [frequency, setFrequency] = useState("Bulanan");
+  const [method, setMethod] = useState("Transfer");
   const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [done, setDone] = useState(false);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!name || !phone) return setError("Nama dan nomor WhatsApp wajib diisi.");
+    if (method === "Diambil" && !address.trim()) return setError("Alamat wajib diisi agar petugas dapat berkunjung.");
     setBusy(true); setError("");
-    try { await register({ name, phone, address, amount, frequency }); setDone(true); }
+    try { await register({ name, phone, address, amount, frequency, method }); setDone(true); }
     catch { setError("Gagal menyimpan pendaftaran. Silakan coba lagi."); }
     finally { setBusy(false); }
   }
@@ -1262,8 +1266,9 @@ function SupporterModal({ close, register }: { close: () => void; register: (dat
       : <form onSubmit={submit}><p className="eyebrow">DONATUR TETAP</p><h2>Jadi Donatur Tetap</h2><p>Daftar sebagai donatur tetap bulanan untuk mendukung program dan operasional Masjid Baitul Fadli secara berkelanjutan.</p>
         <label className="field">Nama lengkap<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
         <label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} required /></label>
-        <label className="field">Alamat<input value={address} onChange={(event) => setAddress(event.target.value)} /></label>
         <NumberField label="Rencana donasi per bulan" value={amount} setValue={setAmount} />
+        <label className="field">Cara menunaikan<select value={method} onChange={(event) => setMethod(event.target.value)}><option value="Transfer">Transfer sendiri (m-banking / QRIS)</option><option value="Diambil">Diambil petugas ke rumah</option></select></label>
+        <label className="field">Alamat{method === "Diambil" ? " (wajib, untuk kunjungan petugas)" : ""}<input value={address} onChange={(event) => setAddress(event.target.value)} required={method === "Diambil"} /></label>
         <label className="field">Frekuensi<select value={frequency} onChange={(event) => setFrequency(event.target.value)}><option>Bulanan</option><option>Mingguan</option></select></label>
         {error && <p className="form-error">{error}</p>}
         <Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : "Daftar Sekarang"}</Button>
