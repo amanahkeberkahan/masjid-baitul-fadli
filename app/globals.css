@@ -324,3 +324,15 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
   .donor-tabs button{font-size:12px;padding:9px 4px}
 }
 .field.channel-field>div.channel-picker{border:0;height:auto;padding:0;display:grid}
+/* Backup Data */
+.backup-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 6px}
+.backup-actions button{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;text-align:left;border:1.5px solid #dbe6e0;background:white;border-radius:12px;padding:12px;font:inherit;color:#132c29;cursor:pointer}
+.backup-actions button:hover:not(:disabled){border-color:#08765a;background:#f0f8f4}
+.backup-actions button:disabled{opacity:.6;cursor:wait}
+.backup-actions button>svg{width:22px;height:22px;color:#08765a}
+.backup-actions button>svg:last-child{width:16px;height:16px;color:#71817b}
+.backup-actions strong{display:block;font-size:14px}.backup-actions small{display:block;font-size:11px;color:#71817b;margin-top:2px;letter-spacing:0;font-weight:400}
+.backup-actions em{font-style:normal;color:#08765a;font-weight:800}
+.backup-last{font-size:12px!important;color:#566a63!important;margin-top:6px!important}
+.backup-note{font-size:12px!important;color:#94661a!important;background:#fbf3df;border-radius:8px;padding:8px 10px;margin-top:8px!important}
+@media(max-width:800px){.backup-actions{grid-template-columns:1fr}}

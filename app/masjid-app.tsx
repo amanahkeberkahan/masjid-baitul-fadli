@@ -14,6 +14,7 @@ import { supabase } from "@/lib/supabase";
 import historicalTransactions from "@/data/finance-history.json";
 import { Intro, NumberField, Panel, Stat, currentJakartaPeriod, dateId, money, monthId } from "./shared";
 import { DonorsPage } from "./donatur";
+import { BackupCard } from "./backup";
 
 type SupabaseRow = Record<string, unknown>;
 
@@ -849,7 +850,7 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     <Intro eyebrow="PENGATURAN AKUN" title="Pengaturan Pengurus" description="Informasi akun dan koneksi penyimpanan aplikasi Masjid Baitul Fadli." />
     <div className="settings-grid">
       <section className="setting-card"><span><ShieldCheck /></span><div><small>AKUN AKTIF</small><h3>{user.email}</h3><p>{isFullAdmin ? "Akun ini terdaftar sebagai pengurus penuh dan dapat mengelola seluruh data masjid." : "Akun ini terdaftar sebagai staff agenda, hanya dapat mengelola kegiatan/agenda masjid."}</p></div></section>
-      {isFullAdmin && <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Firebase Firestore</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>}
+      {isFullAdmin && <BackupCard email={user.email ?? ""} />}
       {isFullAdmin && <section className="setting-card wide admin-accounts">
         <span><UserPlus /></span>
         <div>
