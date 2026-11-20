@@ -1,6 +1,9 @@
-import { supabaseAdmin } from "@/lib/supabase-admin";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export async function POST(request: Request) {
+  let supabaseAdmin: ReturnType<typeof getSupabaseAdmin>;
+  try { supabaseAdmin = getSupabaseAdmin(); }
+  catch { return Response.json({ error: "Server belum dikonfigurasi (env Supabase belum diatur)." }, { status: 500 }); }
   const authHeader = request.headers.get("authorization") ?? "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return Response.json({ error: "Tidak terotentikasi." }, { status: 401 });
