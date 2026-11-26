@@ -216,3 +216,123 @@ html{background:#f3f6f8}body{background:#f3f6f8;color:#172433;font-family:var(--
  :root,body,.shell *,.shell .sidebar,.shell .sidebar *{scrollbar-width:auto;scrollbar-color:auto}
 }
 @media(forced-colors:active){:root,body,.shell *,.shell .sidebar,.shell .sidebar *{scrollbar-color:auto}}
+/* ===== Donatur Tetap ===== */
+.donor-intro-actions{display:flex;gap:8px;flex-wrap:wrap}
+.donor-notice{display:flex;align-items:center;gap:10px;background:#e6f4ee;color:#075f4a;border:1px solid #bfe0d2;border-radius:10px;padding:10px 12px;margin:0;font-size:14px;font-weight:600}
+.donor-notice svg{width:18px;flex:none}.donor-notice button{margin-left:auto;border:0;background:transparent;color:inherit;display:grid;place-items:center;padding:2px}
+.period-switch{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+.period-switch>button{width:38px;height:38px;border:1px solid #dbe6e0;background:white;border-radius:10px;font-size:20px;line-height:1;color:#08765a}
+.period-switch label{display:flex;align-items:center;gap:8px;background:white;border:1px solid #dbe6e0;border-radius:10px;padding:4px 10px;font-size:12px;font-weight:700;color:#566a63}
+.period-switch input{border:0;font:600 14px Arial;color:#132c29;background:transparent;padding:6px 0;outline:none}
+.period-switch .period-today{width:auto;padding:0 12px;font-size:13px;font-weight:700}
+.donor-tabs{display:flex;gap:6px;background:#e8efeb;border-radius:12px;padding:4px;width:fit-content;max-width:100%;margin-top:4px}
+.donor-tabs button{border:0;background:transparent;border-radius:9px;padding:9px 14px;font-weight:700;font-size:13px;color:#566a63;white-space:nowrap}
+.donor-tabs button.active{background:white;color:#08765a;box-shadow:0 2px 8px #1c41371a}
+.donor-toolbar{align-items:end}
+.donor-bulk{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:13px 0}
+.text-link{border:0;background:transparent;color:#08765a;font-weight:700;font-size:13px;text-decoration:underline;padding:4px}
+.donor-list{display:grid}
+.donor-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:13px 4px;border-top:1px solid #edf1ef}
+.donor-row:first-child{border-top:0}
+.donor-row.inactive{opacity:.55}.donor-row.sent{background:#f5faf7}
+.donor-avatar{width:40px;height:40px;background:#e6f2ed;color:#08765a;border-radius:50%;display:grid;place-items:center;font-weight:800;font-size:12px;flex:none}
+.donor-avatar.paid{background:#08765a;color:white}.donor-avatar svg{width:20px}
+.donor-main{min-width:0;display:grid;gap:4px;justify-items:start}
+.donor-main strong{font-size:14px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.donor-main small{font-size:12px;color:#71817b;overflow-wrap:anywhere}
+.donor-main .warn{color:#b37d1e;font-weight:700}
+.donor-tag{font-style:normal;font-size:10px;font-weight:700;background:#eef2f0;color:#566a63;border-radius:20px;padding:2px 7px}
+.donor-badge{font-size:11px;font-weight:700;border-radius:20px;padding:3px 9px}
+.donor-badge.paid{background:#e5f4ed;color:#08765a}.donor-badge.due{background:#fdecea;color:#b84236}
+.donor-badge.wait{background:#fbf3df;color:#94661a}.donor-badge.off{background:#eef2f0;color:#71817b}
+.donor-reminded{font-size:11px!important;color:#8a9893!important}
+.donor-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.donor-actions .primary{height:36px;padding:0 12px;font-size:13px}
+.icon-btn{width:36px;height:36px;border:1px solid #e1e9e5;background:white;border-radius:10px;display:grid;place-items:center;color:#566a63}
+.icon-btn svg{width:16px}
+.wa-btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 12px;border-radius:10px;background:#1fa855;color:white;font-weight:700;font-size:13px;text-decoration:none;white-space:nowrap}
+.wa-btn:hover{background:#18914a}.wa-btn svg{width:16px}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field-row>.field{margin:6px 0}
+.field-row>button{height:44px}
+.check-field{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#3d524b;margin:12px 0;line-height:1.4}
+.check-field input{width:18px;height:18px;margin:1px 0 0;accent-color:#08765a;flex:none}
+.modal-wide{width:min(620px,100%)}
+.modal-hint{font-size:13px;color:#566a63;line-height:1.55;margin:6px 0 4px}
+.modal-hint code,.import-preview code{background:#eef3f0;border-radius:5px;padding:1px 5px;font-size:12px}
+.import-preview{border:1px solid #dbe6e0;border-radius:12px;padding:12px;margin:8px 0;display:grid;gap:6px}
+.import-preview strong{font-size:14px;color:#08765a}.import-preview small{font-size:12px;color:#94661a}
+.import-preview ul{list-style:none;margin:4px 0 0;padding:0;max-height:220px;overflow:auto}
+.import-preview li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;font-size:13px;padding:6px 0;border-top:1px solid #f0f4f2}
+.import-preview li span:nth-child(2){color:#8a9893}
+.queue-progress{font-size:13px;font-weight:700;color:#08765a;margin:6px 0}
+.queue-list{max-height:48vh;overflow:auto;margin-bottom:12px}
+.template-preview{margin:6px 0 10px;font-size:13px}.template-preview summary{cursor:pointer;font-weight:700;color:#08765a}
+.template-preview pre{white-space:pre-wrap;font:13px/1.5 Arial;background:#e7f7ee;border-radius:12px;padding:12px;margin:8px 0 0}
+.recap-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.recap-table{border-collapse:collapse;width:100%;min-width:760px;font-size:12px}
+.recap-table th,.recap-table td{border-bottom:1px solid #edf1ef;padding:8px 6px;text-align:center}
+.recap-table thead th{color:#71817b;font-weight:700;font-size:11px}
+.recap-table tbody th,.recap-table tfoot th{text-align:left;font-weight:700;position:sticky;left:0;background:white;min-width:130px}
+.recap-table tbody th small{display:block;font-weight:400;color:#8a9893;font-size:11px}
+.recap-table td.paid{background:#e5f4ed;color:#08765a;font-weight:800}
+.recap-table .total{font-weight:700;color:#132c29}
+.recap-table tfoot td,.recap-table tfoot th{font-weight:700;border-top:2px solid #dbe6e0}
+@media(max-width:800px){
+  .donor-row{grid-template-columns:auto minmax(0,1fr)}
+  .donor-actions{grid-column:1/-1;justify-content:flex-start;padding-left:52px}
+  .donor-bulk>button{flex:1 1 auto}
+  .donor-tabs{width:100%}.donor-tabs button{flex:1;padding:9px 8px}
+}
+@media(max-width:430px){.field-row{grid-template-columns:1fr}.donor-actions{padding-left:0}}
+@media(max-width:520px){
+  .donor-actions{flex-wrap:nowrap;gap:5px;padding-left:0}
+  .donor-actions .wa-btn,.donor-actions .primary{flex:1 1 auto;justify-content:center;padding:0 8px;font-size:12px}
+  .donor-actions .icon-btn{width:34px;flex:none}
+}
+/* Donatur Tetap: jalur transfer vs diambil */
+.channel-picker{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.channel-picker button{display:grid;grid-template-columns:auto 1fr;column-gap:8px;row-gap:3px;align-items:center;text-align:left;border:1.5px solid #dbe6e0;background:white;border-radius:12px;padding:11px 12px;color:#3d524b;font:inherit}
+.channel-picker button svg{width:18px;grid-row:1;color:#71817b}
+.channel-picker button strong{font-size:13px;color:#132c29}
+.channel-picker button small{grid-column:1/-1;font-size:11px;font-weight:400;color:#71817b;line-height:1.35}
+.channel-picker button.active{border-color:#08765a;background:#f0f8f4;box-shadow:0 0 0 3px #08765a1a}
+.channel-picker button.active svg{color:#08765a}
+.donor-tag svg{width:11px;height:11px;margin-right:3px;vertical-align:-1px}
+.donor-tag.channel-diambil{background:#eaf1fb;color:#2c5d9a}.donor-tag.channel-transfer{background:#eef6f2;color:#3a6f5c}
+.donor-badge.held{background:#eaf1fb;color:#2c5d9a}
+.recap-table td.held{background:#eaf1fb;color:#2c5d9a;font-weight:800}
+.wa-icon{color:#1fa855}
+.pickup-group{border:1px solid #e6ede9;border-radius:14px;padding:12px 14px;margin-top:12px}
+.pickup-group:first-of-type{margin-top:0}
+.pickup-group-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding-bottom:8px;border-bottom:1px solid #edf1ef}
+.pickup-group-head strong{display:flex;align-items:center;gap:7px;font-size:15px}
+.pickup-group-head strong svg{width:17px;color:#2c5d9a}
+.pickup-group-head small{display:block;font-size:12px;color:#71817b;margin-top:3px}
+.pickup-group-head .warn{color:#b84236;font-weight:700}
+.pickup-note{color:#566a63!important}
+.held-list{list-style:none;margin:8px 0 0;padding:0}
+.held-list li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:12px;font-size:13px;padding:8px 0;border-top:1px solid #f0f4f2}
+.held-list li:first-child{border-top:0}.held-list li span:nth-child(2){color:#8a9893;font-size:12px}
+.deposit-total{display:flex;justify-content:space-between;align-items:center;background:#f0f8f4;border-radius:12px;padding:12px 14px;margin:12px 0 4px;font-size:13px;color:#3d524b}
+.deposit-total strong{font-size:18px;color:#08765a}
+.donor-tabs.compact{margin:10px 0 2px}
+@media(max-width:520px){
+  .channel-picker{grid-template-columns:1fr}
+  .held-list li{grid-template-columns:minmax(0,1fr) auto}.held-list li span:nth-child(2){grid-column:1;grid-row:2}
+  .pickup-group{padding:10px}
+  .donor-tabs button{font-size:12px;padding:9px 4px}
+}
+.field.channel-field>div.channel-picker{border:0;height:auto;padding:0;display:grid}
+/* Backup Data */
+.backup-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:14px 0 6px}
+.backup-actions button{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;text-align:left;border:1.5px solid #dbe6e0;background:white;border-radius:12px;padding:12px;font:inherit;color:#132c29;cursor:pointer}
+.backup-actions button:hover:not(:disabled){border-color:#08765a;background:#f0f8f4}
+.backup-actions button:disabled{opacity:.6;cursor:wait}
+.backup-actions button>svg{width:22px;height:22px;color:#08765a}
+.backup-actions button>svg:last-child{width:16px;height:16px;color:#71817b}
+.backup-actions strong{display:block;font-size:14px}.backup-actions small{display:block;font-size:11px;color:#71817b;margin-top:2px;letter-spacing:0;font-weight:400}
+.backup-actions em{font-style:normal;color:#08765a;font-weight:800}
+.backup-last{font-size:12px!important;color:#566a63!important;margin-top:6px!important}
+.backup-note{font-size:12px!important;color:#94661a!important;background:#fbf3df;border-radius:8px;padding:8px 10px;margin-top:8px!important}
+@media(max-width:800px){.backup-actions{grid-template-columns:1fr}}

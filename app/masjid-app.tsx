@@ -1,21 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import type { User } from "@supabase/supabase-js";
 import {
   ArrowDownLeft, ArrowUpRight, Building2, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight,
-  Clock3, Download, FileDown, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
+  Clock3, Download, FileDown, HandCoins, HeartHandshake, Home, Landmark, LayoutGrid, LocateFixed, LogOut, MapPin,
   Moon, Pencil, Plus, QrCode, RefreshCw, Search, Settings, ShieldCheck, Sun, Tags, Trash2, Upload, UserPlus, Users, Wallet, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { supabase } from "@/lib/supabase";
 import historicalTransactions from "@/data/finance-history.json";
+import { Intro, NumberField, Panel, Stat, currentJakartaPeriod, dateId, money, monthId } from "./shared";
+import { DonorsPage } from "./donatur";
+import { BackupCard } from "./backup";
 
 type SupabaseRow = Record<string, unknown>;
 
-type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "master" | "pengaturan" | "menu";
+type View = "beranda" | "shalat" | "keuangan" | "program" | "kegiatan" | "jamaah" | "donatur" | "master" | "pengaturan" | "menu";
 type Kind = "transaction" | "program" | "event" | "member" | "structure";
 type DataRecord = {
   id: string; kind: Kind; title: string; date: string; amount: number; type: string;
@@ -23,9 +26,9 @@ type DataRecord = {
   createdAt: number;
 };
 type SaveRecord = Omit<DataRecord, "id" | "createdAt">;
-type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string };
+type SupporterEntry = { name: string; phone: string; address: string; amount: number; frequency: string; method: string };
 type CategoryItem = { id: string; name: string; type: string };
-type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string };
+type DonationSettings = { bankName: string; accountNumber: string; accountHolder: string; qrisUrl: string; reminderTemplate: string; pickupTemplate: string };
 type AdminAccount = { id: string; email: string; active: boolean; role: string };
 type PrayerState = ReturnType<typeof usePrayerTimes>;
 type FinanceSummary = {
@@ -48,6 +51,9 @@ const columnByField: Partial<Record<keyof SaveRecord, string>> = { imageUrl: "im
 function toRow(kind: Kind, data: SaveRecord): SupabaseRow {
   const row: SupabaseRow = {};
   for (const field of fieldsByKind[kind]) row[columnByField[field] ?? field] = data[field];
+  // Kolom "date" bertipe DATE di Postgres: string kosong ditolak ("invalid input syntax
+  // for type date"), sehingga agenda tanpa tanggal gagal disimpan. Kirim null.
+  if ("date" in row && !row.date) row.date = null;
   return row;
 }
 const publicNav = [
@@ -59,18 +65,9 @@ const publicNav = [
 const privateNav = [
   ["keuangan", "Keuangan", Wallet],
   ["jamaah", "Data Jamaah", Users],
+  ["donatur", "Donatur Tetap", HandCoins],
   ["master", "Master Data", Tags],
 ] as const;
-const money = (value: number) => new Intl.NumberFormat("id-ID", {
-  style: "currency", currency: "IDR", maximumFractionDigits: 0,
-}).format(value);
-function currentJakartaPeriod() {
-  const parts = new Intl.DateTimeFormat("en", {
-    timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit",
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}`;
-}
 
 function summarizeTransactions(items: Array<{ type: string; amount: number; date: string }>, live = true): FinanceSummary {
   const period = currentJakartaPeriod();
@@ -94,14 +91,6 @@ function summarizeTransactions(items: Array<{ type: string; amount: number; date
 }
 const historicalFinance = summarizeTransactions(historicalTransactions, false);
 
-function dateId(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || "data terakhir";
-  return new Intl.DateTimeFormat("id-ID", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${value}T12:00:00+07:00`));
-}
-function monthId(period: string) {
-  if (!/^\d{4}-\d{2}$/.test(period)) return "bulan ini";
-  return new Intl.DateTimeFormat("id-ID", { month: "long", year: "numeric" }).format(new Date(`${period}-01T12:00:00+07:00`));
-}
 function previousMonthId(period: string) {
   if (!/^\d{4}-\d{2}$/.test(period)) return "Bulan Lalu";
   const [year, month] = period.split("-").map(Number);
@@ -113,6 +102,47 @@ function defaultFinanceRange() {
   }).formatToParts(new Date());
   const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return { from: `${value.year}-${value.month}-01`, to: `${value.year}-${value.month}-${value.day}` };
+}
+
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // sama dengan file_size_limit bucket "images"
+
+// Foto dari HP biasanya 3-12 MB dan 4000px+. Diperkecil di browser sebelum diunggah
+// supaya tidak menabrak batas 8 MB, upload lebih cepat, dan halaman publik ringan.
+async function compressImage(file: File, maxDimension: number): Promise<Blob> {
+  if (file.type === "image/gif") return file; // jangan rusak animasi
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) { bitmap.close(); return file; }
+    context.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.85));
+    const output = blob && blob.type === "image/webp" ? blob
+      : await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    if (!output) return file;
+    // Kalau file asli sudah kecil dan tidak perlu diperkecil, pakai yang asli.
+    return scale === 1 && output.size >= file.size && file.type !== "image/heic" ? file : output;
+  } catch {
+    // Format yang tidak bisa dibaca browser (mis. HEIC di Chrome): unggah apa adanya.
+    return file;
+  }
+}
+
+function describeUploadError(message: string) {
+  const text = message.toLowerCase();
+  if (text.includes("row-level security") || text.includes("unauthorized") || text.includes("403")) {
+    return "Akun ini belum diizinkan mengunggah gambar. Pastikan akun pengurus aktif dan supabase/storage.sql sudah dijalankan di Supabase.";
+  }
+  if (text.includes("bucket not found")) return "Bucket penyimpanan \"images\" belum dibuat. Jalankan supabase/storage.sql di Supabase SQL Editor.";
+  if (text.includes("exceeded") || text.includes("too large") || text.includes("413")) return "Ukuran gambar melebihi batas 8 MB.";
+  if (text.includes("mime") || text.includes("invalid_mime_type")) return "Format gambar tidak didukung. Gunakan JPG, PNG, atau WEBP.";
+  if (text.includes("fetch") || text.includes("network")) return "Koneksi internet terputus saat mengunggah. Coba lagi.";
+  return `Gagal mengunggah gambar: ${message}`;
 }
 
 function mapRecord(kind: Kind, row: SupabaseRow): DataRecord {
@@ -152,7 +182,8 @@ export function MasjidApp() {
   const [financeCategories, setFinanceCategories] = useState<CategoryItem[]>([]);
   const [memberCategories, setMemberCategories] = useState<CategoryItem[]>([]);
   const [cashAccounts, setCashAccounts] = useState<CategoryItem[]>([]);
-  const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "" });
+  const [donationSettings, setDonationSettings] = useState<DonationSettings>({ bankName: "", accountNumber: "", accountHolder: "", qrisUrl: "", reminderTemplate: "", pickupTemplate: "" });
+  const [donateAmount, setDonateAmount] = useState<number | null>(null);
   const [admins, setAdmins] = useState<AdminAccount[]>([]);
   const prayer = usePrayerTimes();
   const [error, setError] = useState("");
@@ -166,11 +197,26 @@ export function MasjidApp() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSidebarCollapsed(sessionStorage.getItem("mbf-sidebar-collapsed") === "true");
       const saved = sessionStorage.getItem(storageKey);
-      if (saved && ["beranda", "shalat", "keuangan", "program", "kegiatan", "jamaah", "master", "pengaturan", "menu"].includes(saved)) {
+      if (saved && ["beranda", "shalat", "keuangan", "program", "kegiatan", "jamaah", "donatur", "master", "pengaturan", "menu"].includes(saved)) {
         setView(saved as View);
       }
     } catch {
       // Navigation remains available when browser storage is disabled.
+    }
+    // Link dari pesan pengingat WhatsApp: /?donasi=100000 langsung membuka QRIS dengan nominal terisi.
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const nominal = Number(params.get("donasi"));
+      if (params.has("donasi")) {
+        setDonateAmount(Number.isFinite(nominal) && nominal > 0 ? Math.round(nominal) : null);
+        setDonateOpen(true);
+        setView("beranda");
+        params.delete("donasi");
+        const rest = params.toString();
+        window.history.replaceState(null, "", window.location.pathname + (rest ? `?${rest}` : "") + window.location.hash);
+      }
+    } catch {
+      // URL tanpa parameter donasi tetap berjalan normal.
     }
     setViewRestored(true);
   }, [storageKey]);
@@ -215,6 +261,13 @@ export function MasjidApp() {
 
   useEffect(() => {
     const unsubscribers: Array<() => void> = [];
+    let lastStatsKey = "";
+    // Beberapa perubahan beruntun (mis. impor/hapus banyak data) cukup memicu satu kali muat ulang.
+    const debounced = (fn: () => Promise<void>) => {
+      let timer: number | undefined;
+      unsubscribers.push(() => window.clearTimeout(timer));
+      return () => { window.clearTimeout(timer); timer = window.setTimeout(() => void fn(), 400); };
+    };
     const subscribe = (kind: Kind) => {
       const table = tables[kind];
       async function fetchAll() {
@@ -225,6 +278,11 @@ export function MasjidApp() {
         if (kind === "transaction") {
           const summary = summarizeTransactions(next);
           setFinanceSummary(summary);
+          const statsKey = JSON.stringify({ ...summary, live: true });
+          // Tulis ringkasan publik hanya jika angkanya berubah, agar tidak memicu
+          // event realtime ke semua pengunjung setiap kali pengurus membuka aplikasi.
+          if (statsKey !== lastStatsKey) lastStatsKey = statsKey;
+          else return setError("");
           void supabase.from("public_stats").upsert({
             key: "finance", income: summary.income, expense: summary.expense, balance: summary.balance,
             opening_balance: summary.openingBalance, period_income: summary.periodIncome,
@@ -236,8 +294,9 @@ export function MasjidApp() {
         setError("");
       }
       void fetchAll();
+      const refetch = debounced(fetchAll);
       const channel = supabase.channel(`${table}-changes`)
-        .on("postgres_changes", { event: "*", schema: "public", table }, () => void fetchAll())
+        .on("postgres_changes", { event: "*", schema: "public", table }, refetch)
         .subscribe();
       unsubscribers.push(() => void supabase.removeChannel(channel));
     };
@@ -284,6 +343,7 @@ export function MasjidApp() {
       setDonationSettings({
         bankName: String(data.bank_name ?? ""), accountNumber: String(data.account_number ?? ""),
         accountHolder: String(data.account_holder ?? ""), qrisUrl: String(data.qris_url ?? ""),
+        reminderTemplate: String(data.reminder_template ?? ""), pickupTemplate: String(data.pickup_template ?? ""),
       });
     }
     void fetchSettings();
@@ -329,7 +389,7 @@ export function MasjidApp() {
   async function logout() {
     await supabase.auth.signOut();
     setAdmin(false);
-    if (view === "keuangan" || view === "jamaah" || view === "pengaturan") setView("beranda");
+    if (["keuangan", "jamaah", "donatur", "master", "pengaturan", "menu"].includes(view)) setView("beranda");
   }
   async function save(data: SaveRecord) {
     if (!user || !admin) throw new Error("Silakan masuk sebagai pengurus.");
@@ -359,7 +419,15 @@ export function MasjidApp() {
     setEditing(record); setForm(record.kind);
   }
   async function registerSupporter(data: SupporterEntry) {
-    await supabase.from("supporters").insert({ ...data, status: "baru" });
+    const { error: insertError } = await supabase.from("supporters").insert({ ...data, status: "baru" });
+    if (insertError) throw new Error(insertError.message);
+  }
+  async function saveReminderTemplates(templates: { reminder: string; pickup: string }) {
+    if (!isFullAdmin) throw new Error("Hanya pengurus penuh yang dapat mengubah pesan.");
+    const { error: saveError } = await supabase.from("settings").upsert({
+      key: "donation", reminder_template: templates.reminder, pickup_template: templates.pickup, updated_at: new Date().toISOString(),
+    });
+    if (saveError) throw new Error(/reminder_template|pickup_template/.test(saveError.message) ? "Jalankan supabase/donatur_tetap.sql terlebih dahulu." : saveError.message);
   }
   const categoryTables: Record<string, string> = {
     cashAccounts: "cash_accounts", financeCategories: "finance_categories", memberCategories: "member_categories",
@@ -374,22 +442,40 @@ export function MasjidApp() {
   }
   async function saveDonationSettings(data: DonationSettings) {
     if (!admin) throw new Error("Silakan masuk sebagai pengurus.");
-    await supabase.from("settings").upsert({
+    const { error: saveError } = await supabase.from("settings").upsert({
       key: "donation", bank_name: data.bankName, account_number: data.accountNumber,
       account_holder: data.accountHolder, qris_url: data.qrisUrl, updated_at: new Date().toISOString(),
     });
+    if (saveError) throw new Error(saveError.message);
   }
   async function uploadImage(file: File, folder: "events" | "qris") {
-    const path = `${folder}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from("images").upload(path, file, { upsert: false });
-    if (uploadError) throw new Error(uploadError.message || "Gagal mengunggah gambar.");
+    if (!file.type.startsWith("image/") && !/\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)) {
+      throw new Error("File harus berupa gambar (JPG, PNG, atau WEBP).");
+    }
+    // QRIS harus tetap tajam agar bisa dipindai, jadi resolusinya dijaga lebih tinggi.
+    const prepared = await compressImage(file, folder === "qris" ? 2000 : 1600);
+    if (/hei[cf]/i.test(prepared.type) || /\.hei[cf]$/i.test(file.name) && prepared === file) {
+      throw new Error("Foto format HEIC (iPhone) belum bisa dibaca browser ini. Kirim/screenshot ulang sebagai JPG, atau unggah lewat Safari.");
+    }
+    if (prepared.size > MAX_UPLOAD_BYTES) {
+      throw new Error(`Ukuran gambar ${(prepared.size / 1048576).toFixed(1)} MB, maksimal 8 MB. Kecilkan dulu atau screenshot posternya.`);
+    }
+    // Nama file asli (spasi, emoji, karakter non-ASCII dari WhatsApp/kamera) bisa ditolak
+    // Supabase Storage sebagai "Invalid key", jadi pakai nama aman yang dibuat sendiri.
+    const ext = prepared.type === "image/webp" ? "webp" : prepared.type === "image/png" ? "png" : prepared.type === "image/gif" ? "gif" : "jpg";
+    const path = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error: uploadError } = await supabase.storage.from("images").upload(path, prepared, {
+      upsert: false, contentType: prepared.type || "image/jpeg", cacheControl: "31536000",
+    });
+    if (uploadError) throw new Error(describeUploadError(uploadError.message));
     const { data } = supabase.storage.from("images").getPublicUrl(path);
     return data.publicUrl;
   }
   async function uploadQris(file: File) {
     if (!isFullAdmin) throw new Error("Silakan masuk sebagai pengurus.");
     const url = await uploadImage(file, "qris");
-    await supabase.from("settings").upsert({ key: "donation", qris_url: url, updated_at: new Date().toISOString() });
+    const { error: settingsError } = await supabase.from("settings").upsert({ key: "donation", qris_url: url, updated_at: new Date().toISOString() });
+    if (settingsError) throw new Error(`QRIS terunggah tapi gagal disimpan ke pengaturan: ${settingsError.message}`);
     return url;
   }
   async function uploadEventPoster(file: File) {
@@ -428,7 +514,7 @@ export function MasjidApp() {
     }
   }
 
-  const needsAuth = ["keuangan", "jamaah", "master", "pengaturan", "menu"].includes(view);
+  const needsAuth = ["keuangan", "jamaah", "donatur", "master", "pengaturan", "menu"].includes(view);
   if (!viewRestored || (needsAuth && !authReady)) {
     return <div role="status" aria-live="polite" style={{ minHeight: "100dvh", display: "grid", placeItems: "center" }}>Memuat halaman...</div>;
   }
@@ -465,16 +551,17 @@ export function MasjidApp() {
           : view === "program" ? <Programs records={records} admin={isFullAdmin} add={() => setForm("program")} donate={() => setDonateOpen(true)} remove={remove} />
           : view === "kegiatan" ? <Events records={records} admin={admin} add={() => setForm("event")} edit={editStart} remove={remove} />
           : view === "jamaah" && isFullAdmin ? <Members records={records} add={() => setForm("member")} edit={editStart} remove={remove} />
+          : view === "donatur" && isFullAdmin && user ? <DonorsPage donationSettings={donationSettings} cashAccounts={cashAccounts} userId={user.id} saveTemplates={saveReminderTemplates} />
           : view === "master" && isFullAdmin ? <MasterData records={records} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} addCategory={addCategory} removeCategory={removeCategory} addStructure={() => setForm("structure")} remove={remove} />
           : view === "pengaturan" && admin && user ? <SettingsPage user={user} isFullAdmin={isFullAdmin} logout={logout} donationSettings={donationSettings} saveDonationSettings={saveDonationSettings} uploadQris={uploadQris} admins={admins} addAdminAccount={addAdminAccount} toggleAdminActive={toggleAdminActive} />
           : view === "menu" && isFullAdmin && user ? <AdminMenu go={setView} logout={logout} />
           : <Dashboard records={records} finance={financeSummary} admin={isFullAdmin} go={setView} donate={() => setDonateOpen(true)} joinSupporter={() => setSupporterOpen(true)} prayer={prayer} />}
       </div>
     </main>
-    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
+    <nav className="bottom-nav" style={{ gridTemplateColumns: `repeat(${mobileNav.length}, minmax(0, 1fr))` }}>{mobileNav.map(([id, label, Icon]) => <button key={id} className={view === id || (id === "menu" && ["kegiatan", "jamaah", "donatur", "master", "pengaturan"].includes(view)) ? "active" : ""} onClick={() => setView(id)}><Icon /><span>{id === "program" ? "Kebaikan" : label.replace("Data ", "")}</span></button>)}</nav>
     {form && <EntryForm kind={form} editing={editing} close={() => { setForm(null); setEditing(null); }} save={save} update={update} financeCategories={financeCategories} memberCategories={memberCategories} cashAccounts={cashAccounts} uploadPoster={uploadEventPoster} />}
     {loginOpen && <LoginModal close={() => setLoginOpen(false)} login={login} />}
-    {donateOpen && <DonationModal close={() => setDonateOpen(false)} donationSettings={donationSettings} />}
+    {donateOpen && <DonationModal close={() => { setDonateOpen(false); setDonateAmount(null); }} donationSettings={donationSettings} initialAmount={donateAmount} />}
     {supporterOpen && <SupporterModal close={() => setSupporterOpen(false)} register={registerSupporter} />}
   </div>;
 }
@@ -549,7 +636,6 @@ function usePrayerTimes() {
   const [failed, setFailed] = useState(false);
   const [locating, setLocating] = useState(false);
   const [gpsError, setGpsError] = useState("");
-  const [now, setNow] = useState(() => Date.now());
   const lastCoords = useRef<{ lat: number; lon: number } | undefined>(undefined);
 
   async function load(coords?: { lat: number; lon: number }) {
@@ -601,15 +687,22 @@ function usePrayerTimes() {
     const timer = window.setInterval(() => { void load(lastCoords.current); }, 45000);
     return () => window.clearInterval(timer);
   }, [failed]);
-  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  return { schedule, dateLabel, location, loading, failed, reload: () => load(lastCoords.current), useGps, locating, gpsError };
+}
 
+// Jam berdetak tiap detik HANYA di komponen yang menampilkan countdown.
+// Sebelumnya detak ini ada di MasjidApp sehingga seluruh aplikasi (termasuk
+// perhitungan laporan keuangan) dirender ulang setiap detik — penyebab utama lag.
+function usePrayerCountdown(schedule: PrayerSchedule | null) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const current = jakartaClock.format(new Date(now)).split(":").map(Number);
   const nowSeconds = current[0] * 3600 + current[1] * 60 + current[2];
   const prayerOnly = prayerItems.filter((item) => item.key !== "Sunrise");
   const next = schedule ? prayerOnly.find((item) => timeToSeconds(schedule[item.key]) > nowSeconds) ?? prayerOnly[0] : null;
   const target = next && schedule ? timeToSeconds(schedule[next.key]) + (next.key === "Fajr" && timeToSeconds(schedule.Fajr) <= nowSeconds ? 86400 : 0) : 0;
   const countdown = target ? formatCountdown(target - nowSeconds) : "--:--:--";
-  return { schedule, dateLabel, location, loading, failed, next, countdown, reload: () => load(lastCoords.current), useGps, locating, gpsError };
+  return { next, countdown };
 }
 
 function timeToSeconds(value: string) {
@@ -625,7 +718,8 @@ function formatCountdown(value: number) {
 }
 
 function PrayerHero({ onOpen, prayer }: { onOpen: () => void; prayer: PrayerState }) {
-  const { schedule, next, countdown, loading, failed, location, useGps, locating } = prayer;
+  const { schedule, loading, failed, location, useGps, locating } = prayer;
+  const { next, countdown } = usePrayerCountdown(schedule);
   return <section className="prayer-hero">
     <div className="prayer-copy"><button type="button" className="location-pill gps-button" onClick={useGps} disabled={locating} title="Gunakan lokasi GPS saya"><MapPin />{locating ? "Mencari lokasi..." : location}</button><p>Salat berikutnya</p><h2>{loading ? "Memuat jadwal..." : failed || !next || !schedule ? "Jadwal belum tersedia" : `${next.label} · ${schedule[next.key].slice(0, 5)}`}</h2><strong className="countdown">{countdown}</strong></div>
     <button className="prayer-link" onClick={onOpen}>Lihat jadwal lengkap <ChevronRight /></button>
@@ -633,7 +727,8 @@ function PrayerHero({ onOpen, prayer }: { onOpen: () => void; prayer: PrayerStat
 }
 
 function PrayerPage({ prayer }: { prayer: PrayerState }) {
-  const { schedule, dateLabel, loading, failed, next, countdown, reload, location, useGps, locating, gpsError } = prayer;
+  const { schedule, dateLabel, loading, failed, reload, location, useGps, locating, gpsError } = prayer;
+  const { next, countdown } = usePrayerCountdown(schedule);
   return <div className="stack prayer-page">
     <Intro eyebrow="WAKTU IBADAH" title="Jadwal Shalat Hari Ini" description="Sesuaikan lokasi dengan GPS untuk jadwal yang lebih akurat." />
     <div className="finance-toolbar no-print">
@@ -651,6 +746,7 @@ function AdminMenu({ go, logout }: { go: (view: View) => void; logout: () => Pro
   const items = [
     ["kegiatan", "Kelola Kegiatan", "Publikasikan agenda masjid", CalendarDays],
     ["jamaah", "Data Jamaah", "Data privat khusus pengurus", Users],
+    ["donatur", "Donatur Tetap", "Ceklis bayar, pengingat WA & QRIS", HandCoins],
     ["master", "Master Data", "Kategori, struktur organisasi", Tags],
     ["pengaturan", "Pengaturan", "Akun, QRIS, dan impor data", Settings],
   ] as const;
@@ -682,10 +778,10 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     event.preventDefault();
     setSavingAccount(true); setAccountResult("");
     try {
-      await saveDonationSettings({ bankName, accountNumber, accountHolder, qrisUrl: donationSettings.qrisUrl });
+      await saveDonationSettings({ ...donationSettings, bankName, accountNumber, accountHolder });
       setAccountResult("Informasi rekening tersimpan.");
     } catch {
-      setAccountResult("Gagal menyimpan. Pastikan Rules Firestore mengizinkan pengurus menulis settings/donation.");
+      setAccountResult("Gagal menyimpan informasi rekening. Pastikan akun Anda pengurus penuh.");
     } finally {
       setSavingAccount(false);
     }
@@ -698,8 +794,8 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     try {
       await uploadQris(file);
       setUploadResult("QRIS berhasil diunggah dan langsung tampil di halaman donasi.");
-    } catch {
-      setUploadResult("Gagal mengunggah QRIS. Pastikan Firebase Storage sudah aktif dan Rules mengizinkan pengurus menulis.");
+    } catch (caught) {
+      setUploadResult(caught instanceof Error ? caught.message : "Gagal mengunggah QRIS.");
     } finally {
       setUploading(false);
     }
@@ -754,7 +850,7 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
     <Intro eyebrow="PENGATURAN AKUN" title="Pengaturan Pengurus" description="Informasi akun dan koneksi penyimpanan aplikasi Masjid Baitul Fadli." />
     <div className="settings-grid">
       <section className="setting-card"><span><ShieldCheck /></span><div><small>AKUN AKTIF</small><h3>{user.email}</h3><p>{isFullAdmin ? "Akun ini terdaftar sebagai pengurus penuh dan dapat mengelola seluruh data masjid." : "Akun ini terdaftar sebagai staff agenda, hanya dapat mengelola kegiatan/agenda masjid."}</p></div></section>
-      {isFullAdmin && <section className="setting-card"><span><Settings /></span><div><small>PENYIMPANAN</small><h3>Firebase Firestore</h3><p>Transaksi, program, kegiatan, dan data jamaah tersimpan pada basis data masjid.</p></div></section>}
+      {isFullAdmin && <BackupCard email={user.email ?? ""} />}
       {isFullAdmin && <section className="setting-card wide admin-accounts">
         <span><UserPlus /></span>
         <div>
@@ -801,12 +897,6 @@ function SettingsPage({ user, isFullAdmin, logout, donationSettings, saveDonatio
   </div>;
 }
 
-function Stat({ label, value, note, icon, color }: { label: React.ReactNode; value: string; note: string; icon: React.ReactNode; color: string }) {
-  return <article className="stat"><span className={"stat-icon " + color}>{icon}</span><small>{label}</small><strong>{value}</strong><em>{note}</em></article>;
-}
-function Panel({ title, action, onAction, children }: { title: string; action: string; onAction?: () => void; children: React.ReactNode }) {
-  return <section className="panel"><div className="panel-head"><h3>{title}</h3><button onClick={onAction}>{action}<ChevronRight /></button></div>{children}</section>;
-}
 function TransactionList({ records }: { records: DataRecord[] }) {
   if (!records.length) return <p className="empty">Belum ada transaksi.</p>;
   return <div>{records.map((item) => { const incoming = item.type === "Pemasukan"; return <div className="transaction" key={item.id}><span className={incoming ? "in" : "out"}>{incoming ? <ArrowDownLeft /> : <ArrowUpRight />}</span><div><strong>{item.title}</strong><small>{item.date || "Tanpa tanggal"}</small></div><b className={incoming ? "plus" : "minus"}>{incoming ? "+" : "−"}{money(item.amount)}</b></div>; })}</div>;
@@ -819,12 +909,9 @@ function EventList({ records }: { records: DataRecord[] }) {
   if (!records.length) return <p className="empty">Belum ada agenda yang dipublikasikan.</p>;
   return <div>{records.map((item) => <div className="event-row" key={item.id}><span className="date"><b>{item.date.slice(8, 10) || "--"}</b><small>{item.date.slice(5, 7) || "BLN"}</small></span><div><strong>{item.title}</strong><small>{item.details || "Informasi menyusul"}</small></div><em>{item.category || "Kegiatan"}</em></div>)}</div>;
 }
-function Intro({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {
-  return <div className="intro"><div><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{description}</p></div>{children}</div>;
-}
 
 function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRecord[]; cashAccounts: CategoryItem[]; add: () => void; edit: (record: DataRecord) => void; remove: (record: DataRecord) => void }) {
-  const allItems = records.filter((item) => item.kind === "transaction");
+  const allItems = useMemo(() => records.filter((item) => item.kind === "transaction"), [records]);
   const kasNames = Array.from(new Set([...cashAccounts.map((item) => item.name), ...allItems.map((item) => item.kas).filter(Boolean)]));
   const [dateFrom, setDateFrom] = useState(() => defaultFinanceRange().from);
   const [dateTo, setDateTo] = useState(() => defaultFinanceRange().to);
@@ -859,15 +946,19 @@ function Finance({ records, cashAccounts, add, edit, remove }: { records: DataRe
     .map(([name, amount]) => ({ name, amount }))
     .sort((a, b) => b.amount - a.amount);
 
-  const ledgerSource = (kas ? allItems.filter((item) => item.kas === kas) : allItems).slice().sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
-  const openingBalance = dateFrom ? ledgerSource.filter((item) => item.date < dateFrom).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
-  const ledgerRows: Array<DataRecord & { runningBalance: number }> = ledgerSource
-    .filter((item) => (!dateFrom || item.date >= dateFrom) && (!dateTo || item.date <= dateTo))
-    .reduce<Array<DataRecord & { runningBalance: number }>>((rows, item) => {
-      const previousBalance = rows.length ? rows[rows.length - 1].runningBalance : openingBalance;
-      const runningBalance = previousBalance + (item.type === "Pemasukan" ? item.amount : -item.amount);
-      return [...rows, { ...item, runningBalance }];
-    }, []);
+  const { openingBalance, ledgerRows } = useMemo(() => {
+    const source = (kas ? allItems.filter((item) => item.kas === kas) : allItems).slice().sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+    const opening = dateFrom ? source.filter((item) => item.date < dateFrom).reduce((sum, item) => sum + (item.type === "Pemasukan" ? item.amount : -item.amount), 0) : 0;
+    // Linear (push), bukan [...rows, item] per baris yang O(n²) dan berat untuk ribuan transaksi.
+    const rows: Array<DataRecord & { runningBalance: number }> = [];
+    let running = opening;
+    for (const item of source) {
+      if ((dateFrom && item.date < dateFrom) || (dateTo && item.date > dateTo)) continue;
+      running += item.type === "Pemasukan" ? item.amount : -item.amount;
+      rows.push({ ...item, runningBalance: running });
+    }
+    return { openingBalance: opening, ledgerRows: rows };
+  }, [allItems, kas, dateFrom, dateTo]);
 
   function exportExcel() {
     const escapeCell = (value: string | number) => {
@@ -1102,14 +1193,17 @@ function EntryForm({ kind, editing, close, save, update, financeCategories, memb
   async function handlePosterUpload(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setUploadingPoster(true);
+    event.target.value = ""; // supaya file yang sama bisa dipilih ulang setelah gagal
+    setUploadingPoster(true); setError("");
     try { setImageUrl(await uploadPoster(file)); }
-    catch { setError("Gagal mengunggah poster. Pastikan Firebase Storage aktif dan Rules mengizinkan pengurus menulis."); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Gagal mengunggah poster."); }
     finally { setUploadingPoster(false); }
   }
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!title) return setError("Nama/judul wajib diisi.");
+    if (!title.trim()) return setError("Nama/judul wajib diisi.");
+    if (kind === "transaction" && !date) return setError("Tanggal transaksi wajib diisi.");
+    if (uploadingPoster) return setError("Tunggu poster selesai diunggah.");
     setBusy(true); setError("");
     const data = { kind, title, date, amount, type, category, details, target, phone, address, kas, imageUrl };
     try { await (editing ? update(editing, data) : save(data)); }
@@ -1123,9 +1217,6 @@ function EntryForm({ kind, editing, close, save, update, financeCategories, memb
     : kind === "member" ? (memberOptions.length ? memberOptions : ["Jamaah", "Relawan"]) : [];
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal entry-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">INPUT DATA</p><h2>{editing ? "Edit" : "Tambah"} {labels[kind]}</h2><label className="field">{kind === "member" || kind === "structure" ? "Nama lengkap" : "Nama / judul"}<input value={title} onChange={(event) => setTitle(event.target.value)} required /></label>{(kind === "transaction" || kind === "event") && <label className="field">Tanggal<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>}{kind === "event" && <div className="field poster-field"><span>Poster Kegiatan</span><div className="poster-upload-box">{imageUrl ? <div className="poster-preview-wrap"><Image src={imageUrl} alt="Poster kegiatan" width={220} height={140} className="poster-img-preview" unoptimized /><button type="button" className="poster-remove-btn" onClick={() => setImageUrl("")}><X /> Hapus Poster</button></div> : <p className="empty-poster-text">Belum ada poster.</p>}<label className="upload-button"><Upload />{uploadingPoster ? "Mengunggah..." : (imageUrl ? "Ganti Poster" : "Unggah Poster")}<input type="file" accept="image/*" onChange={handlePosterUpload} disabled={uploadingPoster} hidden /></label></div></div>}{kind === "transaction" && <><label className="field">Kas<select value={kas} onChange={(event) => setKas(event.target.value)}><option value="">Pilih kas</option>{cashOptions.map((option) => <option key={option}>{option}</option>)}</select></label><label className="field">Jenis<select value={type} onChange={(event) => setType(event.target.value)}><option>Pemasukan</option><option>Pengeluaran</option></select></label><NumberField label="Nominal" value={amount} setValue={setAmount} /></>}{kind === "program" && <><NumberField label="Dana terkumpul" value={amount} setValue={setAmount} /><NumberField label="Target dana" value={target} setValue={setTarget} /></>}{kind === "member" && <><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label><label className="field">Alamat / RT<input value={address} onChange={(event) => setAddress(event.target.value)} /></label><label className="field">Status Domisili<select value={type} onChange={(event) => setType(event.target.value)}><option>Mukim</option><option>Non-Mukim</option></select></label></>}{kind === "structure" && <><label className="field">Jabatan<input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="Contoh: Ketua Takmir" /></label><label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} /></label></>}{kind !== "structure" && <label className="field">Kategori<select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Pilih kategori</option>{options.map((option) => <option key={option}>{option}</option>)}</select></label>}{kind !== "member" && <label className="field">Keterangan<textarea value={details} onChange={(event) => setDetails(event.target.value)} /></label>}{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : editing ? "Simpan Perubahan" : "Simpan Data"}</Button></form></div>;
 }
-function NumberField({ label, value, setValue }: { label: string; value: number; setValue: (value: number) => void }) {
-  return <label className="field">{label}<input type="number" min="0" value={value || ""} onChange={(event) => setValue(Number(event.target.value))} /></label>;
-}
 function LoginModal({ close, login }: { close: () => void; login: (email: string, password: string) => Promise<void> }) {
   const [email, setEmail] = useState(""); const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false); const [error, setError] = useState("");
@@ -1135,9 +1226,9 @@ function LoginModal({ close, login }: { close: () => void; login: (email: string
   }
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><form className="modal login-form" onSubmit={submit}><button type="button" className="modal-x" onClick={close}><X /></button><p className="eyebrow">AKSES TERBATAS</p><h2>Masuk sebagai Pengurus</h2><p>Gunakan akun yang telah didaftarkan oleh administrator masjid.</p><label className="field">Email<input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="field">Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{error && <p className="form-error">{error}</p>}<Button className="primary" disabled={busy}>{busy ? "Memeriksa..." : "Masuk"}</Button></form></div>;
 }
-function DonationModal({ close, donationSettings }: { close: () => void; donationSettings: DonationSettings }) {
-  const [amount, setAmount] = useState(100000);
-  const [step, setStep] = useState<"amount" | "qris" | "done">("amount");
+function DonationModal({ close, donationSettings, initialAmount }: { close: () => void; donationSettings: DonationSettings; initialAmount?: number | null }) {
+  const [amount, setAmount] = useState(initialAmount ?? 100000);
+  const [step, setStep] = useState<"amount" | "qris" | "done">(initialAmount ? "qris" : "amount");
   const qrisSrc = donationSettings.qrisUrl || "/qris-masjid-baitul-fadli.svg";
   const hasAccount = donationSettings.bankName || donationSettings.accountNumber;
   return <div className="modal-wrap"><button className="backdrop" onClick={close} aria-label="Tutup" /><section className="modal">
@@ -1159,12 +1250,14 @@ function DonationModal({ close, donationSettings }: { close: () => void; donatio
 function SupporterModal({ close, register }: { close: () => void; register: (data: SupporterEntry) => Promise<void> }) {
   const [name, setName] = useState(""); const [phone, setPhone] = useState(""); const [address, setAddress] = useState("");
   const [amount, setAmount] = useState(100000); const [frequency, setFrequency] = useState("Bulanan");
+  const [method, setMethod] = useState("Transfer");
   const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [done, setDone] = useState(false);
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!name || !phone) return setError("Nama dan nomor WhatsApp wajib diisi.");
+    if (method === "Diambil" && !address.trim()) return setError("Alamat wajib diisi agar petugas dapat berkunjung.");
     setBusy(true); setError("");
-    try { await register({ name, phone, address, amount, frequency }); setDone(true); }
+    try { await register({ name, phone, address, amount, frequency, method }); setDone(true); }
     catch { setError("Gagal menyimpan pendaftaran. Silakan coba lagi."); }
     finally { setBusy(false); }
   }
@@ -1174,8 +1267,9 @@ function SupporterModal({ close, register }: { close: () => void; register: (dat
       : <form onSubmit={submit}><p className="eyebrow">DONATUR TETAP</p><h2>Jadi Donatur Tetap</h2><p>Daftar sebagai donatur tetap bulanan untuk mendukung program dan operasional Masjid Baitul Fadli secara berkelanjutan.</p>
         <label className="field">Nama lengkap<input value={name} onChange={(event) => setName(event.target.value)} required /></label>
         <label className="field">Nomor WhatsApp<input value={phone} onChange={(event) => setPhone(event.target.value)} required /></label>
-        <label className="field">Alamat<input value={address} onChange={(event) => setAddress(event.target.value)} /></label>
         <NumberField label="Rencana donasi per bulan" value={amount} setValue={setAmount} />
+        <label className="field">Cara menunaikan<select value={method} onChange={(event) => setMethod(event.target.value)}><option value="Transfer">Transfer sendiri (m-banking / QRIS)</option><option value="Diambil">Diambil petugas ke rumah</option></select></label>
+        <label className="field">Alamat{method === "Diambil" ? " (wajib, untuk kunjungan petugas)" : ""}<input value={address} onChange={(event) => setAddress(event.target.value)} required={method === "Diambil"} /></label>
         <label className="field">Frekuensi<select value={frequency} onChange={(event) => setFrequency(event.target.value)}><option>Bulanan</option><option>Mingguan</option></select></label>
         {error && <p className="form-error">{error}</p>}
         <Button className="primary" disabled={busy}>{busy ? "Menyimpan..." : "Daftar Sekarang"}</Button>
